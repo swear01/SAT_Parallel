@@ -84,6 +84,63 @@ make -j8
 
 ---
 
+## Benchmark 測試
+
+### 下載測試集
+
+自動從 benchmark-database.de 平行下載 SAT Competition 2023/2024 Main Track 測試集。
+
+```bash
+source env.sh
+
+# 下載 SC2023 + SC2024（796 instances，8 執行緒，約 20 分鐘）
+python scripts/download_benchmarks.py
+
+# 只下載特定年份
+python scripts/download_benchmarks.py --year 2023
+python scripts/download_benchmarks.py --year 2024
+
+# 背景下載（適合 SSH 連線）
+python scripts/download_benchmarks.py --bg
+# Monitor: tail -f benchmarks/download.log
+
+# 更多選項
+python scripts/download_benchmarks.py -j 16          # 16 並行下載
+python scripts/download_benchmarks.py --limit 50     # 每年只下載前 50 個
+```
+
+下載完成後自動產生 `benchmarks/instances.csv` 索引。再次執行會跳過已下載的檔案。
+
+### 執行 Solver
+
+兩種預設模式：
+
+| Preset | Timeout | Instances | 用途 |
+|--------|---------|-----------|------|
+| `test` | 5s | 前 10 個 | 快速煙霧測試、確認 solver 可執行 |
+| `full` | 1000s | 全部（796 個） | 正式 baseline 評估 |
+
+```bash
+# 煙霧測試（約 1 分鐘）
+python scripts/run_benchmark.py --preset test --solver deps/cadical/build/cadical --tag cadical_test
+python scripts/run_benchmark.py --preset test --solver deps/painless/painless --tag painless_test
+
+# 正式執行（可能需要數小時）
+python scripts/run_benchmark.py --preset full --solver deps/cadical/build/cadical --tag cadical_1c
+python scripts/run_benchmark.py --preset full --solver deps/painless/painless --solver-cpus 32 --tag painless_32t
+
+# 自訂參數
+python scripts/run_benchmark.py --solver deps/cadical/build/cadical --timeout 300 --limit 20 --tag custom
+```
+
+### 分析結果
+
+```bash
+python scripts/score.py results/baseline/*.csv --timeout 1000 --output-dir results/baseline/
+```
+
+---
+
 ## 專案結構
 
 ```
@@ -98,7 +155,11 @@ SAT_Parallel/
 ├── docs/
 │   └── IMPL_DETAILS.md           # 資料結構、公式、通訊協定
 ├── scripts/
-│   └── setup_env.sh              # 一鍵安裝腳本
+│   ├── setup_env.sh              # 一鍵安裝腳本
+│   ├── download_benchmarks.py    # 下載 SAT Competition benchmarks
+│   ├── run_benchmark.py          # 執行 solver 並記錄結果
+│   └── score.py                  # 計分與分析工具（PAR-2、cactus plot）
+├── results/                      # benchmark 結果 CSV 與圖表
 ├── src/
 │   ├── core/                     # DSRG 圖、中心性計算、聚合、GC
 │   ├── master/                   # Master 邏輯、社群偵測、廣播

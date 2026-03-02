@@ -8,34 +8,42 @@
 
 > **目標：** 建立可重複、可自動化的 benchmark 測試流程，跑出 vanilla Painless 的 baseline 成績作為後續改進的比較基準。
 
-- [ ] **0.1** 取得 SAT Competition benchmark 測試集
-  - 下載 SAT Competition 2023/2024 的 main track benchmark instances
-  - 依 SAT / UNSAT / UNKNOWN 分類放入 `benchmarks/`
-  - 建立 `benchmarks/instances.csv` 索引（路徑、預期結果、類別）
+> **硬體：** i9-13900K (24 核 / 32 緒)、NVIDIA RTX 4090
 
-- [ ] **0.2** 撰寫 benchmark runner (`scripts/run_benchmark.py`)
-  - 輸入：solver binary path、benchmark 目錄、timeout（預設 5000s）、核心數
-  - 對每個 instance 執行 solver，記錄 wall time、exit code、結果（SAT/UNSAT/TIMEOUT）
-  - 輸出：`results/<solver>_<timestamp>.csv`（每列一個 instance）
-  - 支援平行跑多個 instance（善用 32 核）
+> **Preset 設定：**
+>
+> | Preset | Timeout | Instances | 用途 |
+> |--------|---------|-----------|------|
+> | `test` | 5s | 前 10 個 | 煙霧測試、CI 驗證 |
+> | `full` | 1000s | 全部 796 個 | 正式 baseline 評估 |
 
-- [ ] **0.3** 撰寫計分與分析工具 (`scripts/score.py`)
-  - 從 results CSV 計算：
-    - **Solved count**（SAT 解數、UNSAT 解數、總解數）
-    - **PAR-2 score**（Penalized Average Runtime：未解 = 2 × timeout）
-    - **Median / Mean solve time**（僅已解 instances）
-    - **Cactus plot**（X 軸 = 解題數量排名，Y 軸 = 累積時間）
+- [x] **0.1** 取得 SAT Competition benchmark 測試集
+  - SC2023 main track：400 instances ✓
+  - SC2024 main track：400 instances ✓
+  - 去重後共 796 unique instances（SAT=331, UNSAT=425, unknown=40）
+  - 建立 `benchmarks/instances.csv` 合併索引（含 year 欄位）
+  - 平行下載器 `scripts/download_benchmarks.py`：8 workers、背景模式、內嵌 SC2023/SC2024 URL
+
+- [x] **0.2** 撰寫 benchmark runner (`scripts/run_benchmark.py`)
+  - 支援 `--preset test`（5s × 10 instances）與 `--preset full`（1000s × all）
+  - 自動偵測 solver 類型（Painless vs CaDiCaL），生成正確的 CLI 參數
+  - 輸出：`results/<tag>_<timestamp>.csv`
+  - `--solver-cpus 0` 自動使用全部核心
+
+- [x] **0.3** 撰寫計分與分析工具 (`scripts/score.py`)
+  - Solved count、PAR-2 score、Median/Mean solve time、Cactus plot
   - 支援多 solver 結果疊加比較
   - 輸出文字摘要 + 圖表 PNG
 
-- [ ] **0.4** 跑 Baseline：vanilla Painless + CaDiCaL
-  - 用 `deps/painless/painless` 跑完整 benchmark set
-  - 記錄不同核心數（1, 4, 8, 16, 32）的成績
-  - 保存結果至 `results/baseline/`
+- [x] **0.4** 煙霧測試驗證（`--preset test`）
+  - CaDiCaL 單核：4/10 solved（5s timeout）✓
+  - Painless 32 緒：7/10 solved（5s timeout）✓
 
-- [ ] **0.5** 跑 Baseline：standalone CaDiCaL（單核對照組）
-  - 用 `deps/cadical/build/cadical` 跑相同 benchmark
-  - 作為單核 sequential solver 基準線
+- [ ] **0.5** 跑 Baseline：full preset（`--preset full`，796 instances × 1000s）
+  - CaDiCaL 單核：`--preset full --solver deps/cadical/build/cadical --tag cadical_1c`
+  - Painless 32 緒：`--preset full --solver deps/painless/painless --solver-cpus 32 --tag painless_32t`
+  - 保存結果至 `results/baseline/`
+  - 預估耗時：數小時至數十小時
 
 - [ ] **0.6** 撰寫 baseline 報告
   - 整理各配置的 PAR-2 / solved count 表格

@@ -62,3 +62,9 @@ env.sh
 *.tmp
 *.bak
 *.cache
+
+# Benchmarks (all re-downloadable via scripts/download_benchmarks.py)
+benchmarks/
+
+# Benchmark results (generated)
+results/
