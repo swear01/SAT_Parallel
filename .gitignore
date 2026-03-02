@@ -52,6 +52,12 @@ compile_commands.json
 *.dll
 *.exe
 
+# Dependencies (built locally by setup_env.sh)
+deps/
+
+# Generated environment file
+env.sh
+
 # Archives / generated data dumps
 *.tmp
 *.bak
