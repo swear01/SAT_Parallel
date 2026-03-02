@@ -1,0 +1,44 @@
+graph:
+  edge_creation_threshold: 3
+  edge_removal_threshold: 0.005
+  edge_weight_momentum: 0.9         # β
+  node_weight_decay: 0.95            # γ
+  lbd_entry_threshold: 3
+  gpu_hotzone_boost: 2.0
+
+centrality:
+  algorithm: degree                  # degree | pagerank
+  pagerank_damping: 0.85
+  pagerank_max_iter: 20
+  pagerank_epsilon: 1e-4
+  centrality_interval: 5000
+  aggregation_method: weighted_sum   # sum | max | weighted_sum
+  aggregation_alpha: 1.0
+
+decision:
+  lambda: 0.3                        # GraphScore 混合權重
+
+communication:
+  delta_patch_conflict_interval: 10000
+  delta_patch_lbd_trigger: 2
+  broadcast_interval_ms: 1000
+  local_weight_retention: 0.7        # α
+  top_k_variables: 100
+  top_k_clauses: 50
+
+gc:
+  gc_interval: 10000
+  eviction_weight_threshold: 0.01
+  eviction_lbd_threshold: 4
+  min_age_before_eviction: 5000
+
+partitioning:
+  algorithm: louvain                 # louvain | label_propagation
+  max_cut_variables: 15
+  enable_work_stealing: true
+
+gpu:
+  report_interval_steps: 100000
+  hotzone_top_k: 200
+  master_push_interval_s: 5.0
+  learnt_clause_lbd_filter: 3

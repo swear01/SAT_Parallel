@@ -1,0 +1,58 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+
+# Logs and local runtime files
+*.log
+*.pid
+*.out
+*.err
+
+# Secrets / local env
+.env
+.env.*
+*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# C / C++ build artifacts
+build/
+bin/
+obj/
+out/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.o
+*.obj
+*.so
+*.a
+*.dylib
+*.dll
+*.exe
+
+# Archives / generated data dumps
+*.tmp
+*.bak
+*.cache
