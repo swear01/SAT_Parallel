@@ -162,4 +162,12 @@ if(TARGET master_lib)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
     add_test(NAME MasterUnitTests COMMAND master_test)
+
+    add_executable(worker_test tests/worker/worker_test.cpp)
+    target_include_directories(worker_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(worker_test PRIVATE master_lib GTest::gtest_main)
+    set_target_properties(worker_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+    add_test(NAME WorkerUnitTests COMMAND worker_test)
 endif()

@@ -119,11 +119,11 @@
 
 > **目標：** 修改 Painless Worker，使其能與 Master 協作。
 
-- [ ] **5.1** Worker 局部權重維護 (`src/worker/local_weights.cpp`)
-- [ ] **5.2** Delta Patch 生成邏輯（觸發條件、打包）
-- [ ] **5.3** 接收 Broadcast → 融合全域權重（EMA）
-- [ ] **5.4** 接收 Cube 分配 → 加入假設文字
-- [ ] **5.5** 整合至 Painless worker 引擎
+- [x] **5.1** Worker 局部權重維護 (`src/worker/local_weights.h`) — EMA 融合 + VSIDS 混合 + top-K 選取
+- [x] **5.2** Delta Patch 生成邏輯 (`src/worker/patch_builder.h`) — conflict interval / LBD 雙觸發、budget 裁剪 < 4KB
+- [x] **5.3** 接收 Broadcast → 融合全域權重 — `merge_broadcast()` EMA: `W_local = α·W_local + (1-α)·W_global`
+- [x] **5.4** 接收 Cube 分配 → 假設文字轉換 — `set_cube()` → assumption literals
+- [x] **5.5** Worker 引擎整合 (`src/worker/worker_engine.h`) — SolverInterface 抽象、自動 broadcast polling、16 tests PASS
 
 ---
 
