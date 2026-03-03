@@ -232,6 +232,20 @@ struct GlobalBroadcast {
 };
 ```
 
+### Clause-Variable 雙向索引
+
+DSRG 內部維護 clause-variable 的雙向映射，供中心性聚合使用：
+
+```cpp
+// DSRG 內部成員
+clause_vars_: unordered_map<uint32_t, vector<uint32_t>>  // clause_id -> var_ids
+var_clauses_: unordered_map<uint32_t, vector<uint32_t>>  // var_id -> clause_ids
+```
+
+- `add_node()` 接受 `literals` 參數，從中提取 `var_id = abs(literal)` 建立索引
+- `remove_node()` 同步清理兩側索引
+- `handle_variable_elimination()` 從 `var_clauses_` 找到受影響的 clauses
+
 ### 圖切割參數
 
 ```yaml

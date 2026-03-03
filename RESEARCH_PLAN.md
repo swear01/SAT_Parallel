@@ -30,6 +30,14 @@
 - **節點 = Clause。** 每個節點追蹤 weight、LBD、所屬社群。Original clauses 永遠保留；Learnt clauses 須通過 LBD 門檻才能進圖。
 - **邊 = 衝突共現。** 兩個 Clause 共同參與衝突解析超過閾值次數後才建立邊。邊權重反映語義關聯強度，非靜態共享變數。
 - **權重動態衰減。** 節點與邊的權重隨時間指數衰減（類似 VSIDS），由新衝突事件與 GPU hotzone 回饋驅動增量。
+- **Clause-Variable 雙向索引。** DSRG 在新增節點時記錄 clause 包含的 variable IDs，維護 clause→vars 與 var→clauses 雙向映射，供 Phase 2 聚合計算使用。
+
+### 實作決策
+
+- **權重衰減策略：全量掃描。** 定期遍歷所有節點（`w *= γ`）與邊（`w *= β`），與增量（`boost_node`）分離操作。100K nodes + 500K edges 的全量掃描 < 1ms，不在 solver 熱路徑上。未來可切換為 lazy decay（VSIDS 風格），介面不變。
+- **Adjacency list 用 `vector` + swap-and-pop。** 相比 `unordered_set`，遍歷鄰居更 cache-friendly（中心性計算的熱路徑），O(degree) 的移除在平均度數 < 20 下可接受。
+- **Pending conflicts lazy cleanup。** 節點刪除時不掃描 `pending_conflicts_`，建邊時才檢查兩端節點是否存在。
+- **不使用外部圖庫。** DSRG 的操作高度領域特定（權重衰減、co-conflict 追蹤、GC 淘汰、subsumption merge），通用圖庫（Graaf、CXXGraph、BGL）無法直接支援，反而增加抽象開銷與記憶體佈局限制。
 
 ---
 

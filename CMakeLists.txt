@@ -6,9 +6,9 @@ set(CMAKE_CUDA_ARCHITECTURES 89)
 
 project(SAT_Parallel LANGUAGES CXX CUDA)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -16,6 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG   "-O0 -g -fsanitize=address")
 
@@ -51,8 +52,18 @@ set_target_properties(cadical PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES "${CADICAL_INCLUDE}"
 )
 
-# ---------- source groups ----------
-file(GLOB_RECURSE CORE_SRC    src/core/*.cpp src/core/*.h)
+# ---------- dsrg_core static library ----------
+file(GLOB_RECURSE CORE_SRC src/core/*.cpp)
+if(CORE_SRC)
+    add_library(dsrg_core STATIC ${CORE_SRC})
+    target_include_directories(dsrg_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(dsrg_core PUBLIC yaml-cpp::yaml-cpp)
+    message(STATUS "dsrg_core sources: ${CORE_SRC}")
+else()
+    message(STATUS "No core sources yet — dsrg_core skipped")
+endif()
+
+# ---------- source groups (for main executable) ----------
 file(GLOB_RECURSE MASTER_SRC  src/master/*.cpp src/master/*.h)
 file(GLOB_RECURSE WORKER_SRC  src/worker/*.cpp src/worker/*.h)
 file(GLOB_RECURSE COMM_SRC    src/comm/*.cpp src/comm/*.h)
@@ -65,7 +76,9 @@ set(ALL_CPP_SRC
 )
 
 # ---------- main executable ----------
-if(ALL_CPP_SRC OR GPU_SRC)
+# Only build when a main entry point exists.
+set(MAIN_ENTRY "${CMAKE_SOURCE_DIR}/src/main.cpp")
+if(EXISTS "${MAIN_ENTRY}" AND (ALL_CPP_SRC OR GPU_SRC))
     add_executable(sat_parallel
         ${ALL_CPP_SRC}
         ${GPU_SRC}
@@ -89,4 +102,31 @@ if(ALL_CPP_SRC OR GPU_SRC)
     )
 else()
     message(STATUS "No source files yet — skipping target (add .cpp/.cu files to src/)")
+endif()
+
+# ---------- testing ----------
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.15.2
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+
+if(TARGET dsrg_core)
+    add_executable(dsrg_test tests/core/dsrg_test.cpp)
+    target_link_libraries(dsrg_test PRIVATE dsrg_core GTest::gtest_main)
+    set_target_properties(dsrg_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+    add_test(NAME DSRGUnitTests COMMAND dsrg_test)
+
+    add_executable(dsrg_bench tests/core/dsrg_bench.cpp)
+    target_link_libraries(dsrg_bench PRIVATE dsrg_core)
+    set_target_properties(dsrg_bench PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
 endif()

@@ -55,18 +55,23 @@
 ## Phase 1 — DSRG 核心資料結構
 
 > **目標：** 實作 DSRG 圖的基本結構與操作，能獨立單元測試。
+>
+> **實作決策：** 全量掃描衰減（< 1ms @100K nodes）、vector + swap-and-pop adjacency list、
+> Clause-Variable 雙向索引內建於 DSRG、不使用外部圖庫、C++20。
 
-- [ ] **1.1** 實作 `GraphNode` / `GraphEdge` 結構體 (`src/core/dsrg_types.h`)
-- [ ] **1.2** 實作 DSRG 圖類別 (`src/core/dsrg.h`, `src/core/dsrg.cpp`)
+- [x] **1.1** 實作 `GraphNode` / `GraphEdge` / `DSRGConfig` 結構體 (`src/core/dsrg_types.h`)
+  - `DSRGConfig` 從 `config/default_params.yaml` 載入
+- [x] **1.2** 實作 DSRG 圖類別 (`src/core/dsrg.h`, `src/core/dsrg.cpp`)
   - 新增/移除節點與邊
-  - 權重更新（指數衰減 + 衝突驅動增量）
-  - 邊的建立門檻判定
-- [ ] **1.3** 實作 GC 機制 (`src/core/dsrg_gc.cpp`)
+  - 權重更新（全量掃描衰減 + 衝突驅動增量 + boost）
+  - 邊的建立門檻判定（co-conflict count >= threshold）
+  - Clause-Variable 雙向索引（clause_vars_ / var_clauses_）
+- [x] **1.3** 實作 GC 機制 (`src/core/dsrg_gc.cpp`)
   - 節點淘汰（weight < threshold && lbd > threshold && age > min）
-  - 弱邊清除
+  - 弱邊清除（swap-and-pop 從 adjacency list 移除）
   - In-processing 同步（subsumption merge、variable elimination）
-- [ ] **1.4** 撰寫 DSRG 單元測試
-- [ ] **1.5** 基準效能測試：10 萬節點 / 50 萬邊的增刪與查詢延遲
+- [x] **1.4** 撰寫 DSRG 單元測試 (`tests/core/dsrg_test.cpp`, Google Test) — 23 tests PASS
+- [x] **1.5** 基準效能測試：10 萬節點 / 50 萬邊的增刪與查詢延遲 (`tests/core/dsrg_bench.cpp`)
 
 ---
 
