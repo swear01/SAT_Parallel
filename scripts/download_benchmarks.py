@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Self-contained parallel downloader for SAT Competition benchmarks.
 
-Downloads from benchmark-database.de. No external metadata files needed.
+Downloads from benchmark-database.de. Each year is stored in its own directory
+(benchmarks/sc2023/, benchmarks/sc2024/) with an independent instances.csv.
 
 Examples:
     python scripts/download_benchmarks.py                          # SC2023 + SC2024, 8 workers
@@ -32,9 +33,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BENCH_DIR = PROJECT_ROOT / "benchmarks"
-CNF_DIR = BENCH_DIR / "cnf"
 CACHE_DIR = BENCH_DIR / ".cache"
-INSTANCES_CSV = BENCH_DIR / "instances.csv"
 
 # ── Embedded source URLs ────────────────────────────────────────────────────
 BENCHMARK_DB = "https://benchmark-database.de"
@@ -323,86 +322,72 @@ def main():
 
     years = ["2023", "2024"] if args.year == "all" else [args.year]
 
-    CNF_DIR.mkdir(parents=True, exist_ok=True)
+    fieldnames = ["hash", "filename", "cnf_path", "expected", "family", "author"]
 
-    # ── Gather instance lists ──
-    all_instances: list[dict] = []
     for year in years:
+        year_dir = BENCH_DIR / f"sc{year}"
+        year_dir.mkdir(parents=True, exist_ok=True)
+        instances_csv = year_dir / "instances.csv"
+
         insts = fetch_track(year)
-        for inst in insts:
-            inst["year"] = year
         if args.limit:
             insts = insts[: args.limit]
-        all_instances.extend(insts)
-        log.info("SC%s: %d instances queued", year, len(insts))
+        log.info("SC%s: %d instances → %s", year, len(insts), year_dir)
 
-    seen: set[str] = set()
-    unique: list[dict] = []
-    for inst in all_instances:
-        if inst["hash"] not in seen:
-            seen.add(inst["hash"])
-            unique.append(inst)
-    log.info("Total unique instances: %d  (workers=%d)", len(unique), args.workers)
+        progress = _Progress(len(insts))
+        results: list[dict] = []
+        results_lock = threading.Lock()
+        t0 = time.monotonic()
 
-    # ── Parallel download ──
-    progress = _Progress(len(unique))
-    results: list[dict] = []
-    results_lock = threading.Lock()
-    t0 = time.monotonic()
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            futures = {pool.submit(download_one, inst, year_dir): inst for inst in insts}
 
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(download_one, inst, CNF_DIR): inst for inst in unique}
+            for future in as_completed(futures):
+                inst, cnf_path, status, error = future.result()
+                done, dl, sk, fl = progress.update(status)
 
-        for future in as_completed(futures):
-            inst, cnf_path, status, error = future.result()
-            done, dl, sk, fl = progress.update(status)
+                if status == "failed":
+                    log.warning("[%d/%d] FAIL %-45s %s",
+                                done, progress.total, inst["filename"][:45], error)
+                elif status == "downloaded":
+                    log.info("[%d/%d]  DL  %-45s",
+                             done, progress.total, inst["filename"][:45])
 
-            if status == "failed":
-                log.warning("[%d/%d] FAIL %-45s %s",
-                            done, progress.total, inst["filename"][:45], error)
-            elif status == "downloaded":
-                log.info("[%d/%d]  DL  %-45s",
-                         done, progress.total, inst["filename"][:45])
+                if cnf_path:
+                    with results_lock:
+                        results.append({
+                            "hash": inst["hash"],
+                            "filename": inst["filename"],
+                            "cnf_path": str(Path(cnf_path).relative_to(PROJECT_ROOT)),
+                            "expected": inst["result"],
+                            "family": inst["family"],
+                            "author": inst["author"],
+                        })
 
-            if cnf_path:
-                with results_lock:
-                    results.append({
-                        "hash": inst["hash"],
-                        "filename": inst["filename"],
-                        "cnf_path": str(Path(cnf_path).relative_to(PROJECT_ROOT)),
-                        "expected": inst["result"],
-                        "family": inst["family"],
-                        "author": inst["author"],
-                        "year": inst.get("year", ""),
-                    })
+                if done % 50 == 0:
+                    elapsed = time.monotonic() - t0
+                    log.info("--- progress: %d/%d  (DL=%d SKIP=%d FAIL=%d)  %.0fs ---",
+                             done, progress.total, dl, sk, fl, elapsed)
 
-            if done % 50 == 0:
-                elapsed = time.monotonic() - t0
-                log.info("--- progress: %d/%d  (DL=%d SKIP=%d FAIL=%d)  %.0fs ---",
-                         done, progress.total, dl, sk, fl, elapsed)
+        elapsed = time.monotonic() - t0
 
-    elapsed = time.monotonic() - t0
+        results.sort(key=lambda r: r["filename"])
+        with open(instances_csv, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(results)
 
-    # ── Write instances.csv ──
-    results.sort(key=lambda r: r["filename"])
-    with open(INSTANCES_CSV, "w", newline="") as f:
-        writer = csv.DictWriter(
-            f, fieldnames=["hash", "filename", "cnf_path", "expected", "family", "author", "year"],
-        )
-        writer.writeheader()
-        writer.writerows(results)
+        sat_n = sum(1 for r in results if r["expected"] == "sat")
+        unsat_n = sum(1 for r in results if r["expected"] == "unsat")
 
-    sat_n = sum(1 for r in results if r["expected"] == "sat")
-    unsat_n = sum(1 for r in results if r["expected"] == "unsat")
-
-    log.info("=" * 60)
-    log.info("Completed in %.0fs", elapsed)
-    log.info("  Downloaded : %d", progress.downloaded)
-    log.info("  Skipped    : %d  (already existed)", progress.skipped)
-    log.info("  Failed     : %d", progress.failed)
-    log.info("  Indexed    : %d  (SAT=%d  UNSAT=%d  unknown=%d)",
-             len(results), sat_n, unsat_n, len(results) - sat_n - unsat_n)
-    log.info("  Output     : %s", INSTANCES_CSV)
+        log.info("=" * 60)
+        log.info("SC%s completed in %.0fs", year, elapsed)
+        log.info("  Downloaded : %d", progress.downloaded)
+        log.info("  Skipped    : %d  (already existed)", progress.skipped)
+        log.info("  Failed     : %d", progress.failed)
+        log.info("  Indexed    : %d  (SAT=%d  UNSAT=%d  unknown=%d)",
+                 len(results), sat_n, unsat_n, len(results) - sat_n - unsat_n)
+        log.info("  Output     : %s", instances_csv)
 
 
 if __name__ == "__main__":

@@ -156,8 +156,8 @@ def main():
     parser.add_argument("--solver", required=True, help="Path to solver binary")
     parser.add_argument("--preset", choices=list(PRESETS.keys()), default=None,
                         help="Preset config: 'test' (5s, 10 cases) or 'full' (1000s, all)")
-    parser.add_argument("--benchmarks", type=str, default="benchmarks/instances.csv",
-                        help="Path to instances.csv (default: benchmarks/instances.csv)")
+    parser.add_argument("--benchmarks", type=str, default="benchmarks/sc2023/instances.csv",
+                        help="Path to instances.csv (default: benchmarks/sc2023/instances.csv)")
     parser.add_argument("--timeout", type=int, default=None, help="Per-instance timeout in seconds")
     parser.add_argument("--limit", type=int, default=None, help="Max number of instances to run")
     parser.add_argument("--solver-cpus", type=int, default=0,

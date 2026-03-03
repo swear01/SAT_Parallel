@@ -88,12 +88,12 @@ make -j8
 
 ### 下載測試集
 
-自動從 benchmark-database.de 平行下載 SAT Competition 2023/2024 Main Track 測試集。
+自動從 benchmark-database.de 平行下載 SAT Competition 2023/2024 Main Track 測試集。每年獨立存放，方便管理與擴充。
 
 ```bash
 source env.sh
 
-# 下載 SC2023 + SC2024（796 instances，8 執行緒，約 20 分鐘）
+# 下載 SC2023 + SC2024（各 400 instances，8 執行緒，約 20 分鐘）
 python scripts/download_benchmarks.py
 
 # 只下載特定年份
@@ -109,7 +109,17 @@ python scripts/download_benchmarks.py -j 16          # 16 並行下載
 python scripts/download_benchmarks.py --limit 50     # 每年只下載前 50 個
 ```
 
-下載完成後自動產生 `benchmarks/instances.csv` 索引。再次執行會跳過已下載的檔案。
+下載完成後各年度目錄自動產生獨立 `instances.csv` 索引：
+
+```
+benchmarks/
+├── sc2023/          # SC2023 main track (400 instances)
+│   ├── instances.csv
+│   └── *.cnf
+└── sc2024/          # SC2024 main track (400 instances)
+    ├── instances.csv
+    └── *.cnf
+```
 
 ### 執行 Solver
 
@@ -118,16 +128,19 @@ python scripts/download_benchmarks.py --limit 50     # 每年只下載前 50 個
 | Preset | Timeout | Instances | 用途 |
 |--------|---------|-----------|------|
 | `test` | 5s | 前 10 個 | 快速煙霧測試、確認 solver 可執行 |
-| `full` | 1000s | 全部（796 個） | 正式 baseline 評估 |
+| `full` | 1000s | 全部 400 個 | 正式 baseline 評估 |
 
 ```bash
-# 煙霧測試（約 1 分鐘）
+# 煙霧測試（預設使用 sc2023）
 python scripts/run_benchmark.py --preset test --solver deps/cadical/build/cadical --tag cadical_test
 python scripts/run_benchmark.py --preset test --solver deps/painless/painless --tag painless_test
 
+# 指定不同資料集
+python scripts/run_benchmark.py --preset test --benchmarks benchmarks/sc2024/instances.csv --solver deps/cadical/build/cadical --tag cadical_test_sc2024
+
 # 正式執行（可能需要數小時）
-python scripts/run_benchmark.py --preset full --solver deps/cadical/build/cadical --tag cadical_1c
-python scripts/run_benchmark.py --preset full --solver deps/painless/painless --solver-cpus 32 --tag painless_32t
+python scripts/run_benchmark.py --preset full --solver deps/cadical/build/cadical --tag cadical_sc2023
+python scripts/run_benchmark.py --preset full --benchmarks benchmarks/sc2024/instances.csv --solver deps/cadical/build/cadical --tag cadical_sc2024
 
 # 自訂參數
 python scripts/run_benchmark.py --solver deps/cadical/build/cadical --timeout 300 --limit 20 --tag custom
@@ -167,7 +180,9 @@ SAT_Parallel/
 │   ├── gpu/                      # CUDA WalkSAT、GPU Prober
 │   ├── comm/                     # lock-free queue、shared memory
 │   └── solver/                   # Painless 框架 + CaDiCaL 介接
-├── benchmarks/                   # SAT benchmark 實例
+├── benchmarks/                   # SAT benchmark 實例（各年度獨立目錄）
+│   ├── sc2023/                   # SC2023 main track (400 instances + instances.csv)
+│   └── sc2024/                   # SC2024 main track (400 instances + instances.csv)
 └── deps/                         # 本地建置的依賴（git ignored）
     ├── cadical/                  # CaDiCaL 3.0.0
     ├── painless/                 # Painless (lip6)

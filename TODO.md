@@ -15,13 +15,12 @@
 > | Preset | Timeout | Instances | 用途 |
 > |--------|---------|-----------|------|
 > | `test` | 5s | 前 10 個 | 煙霧測試、CI 驗證 |
-> | `full` | 1000s | 全部 796 個 | 正式 baseline 評估 |
+> | `full` | 1000s | 全部 400 個 | 正式 baseline 評估 |
 
 - [x] **0.1** 取得 SAT Competition benchmark 測試集
-  - SC2023 main track：400 instances ✓
-  - SC2024 main track：400 instances ✓
-  - 去重後共 796 unique instances（SAT=331, UNSAT=425, unknown=40）
-  - 建立 `benchmarks/instances.csv` 合併索引（含 year 欄位）
+  - SC2023 main track：400 instances（SAT=154, UNSAT=219, unknown=27）→ `benchmarks/sc2023/`
+  - SC2024 main track：400 instances（SAT=179, UNSAT=208, unknown=13）→ `benchmarks/sc2024/`
+  - 各年度獨立目錄，各自 `instances.csv`，不合併去重
   - 平行下載器 `scripts/download_benchmarks.py`：8 workers、背景模式、內嵌 SC2023/SC2024 URL
 
 - [x] **0.2** 撰寫 benchmark runner (`scripts/run_benchmark.py`)
@@ -39,9 +38,10 @@
   - CaDiCaL 單核：4/10 solved（5s timeout）✓
   - Painless 32 緒：7/10 solved（5s timeout）✓
 
-- [ ] **0.5** 跑 Baseline：full preset（`--preset full`，796 instances × 1000s）
-  - CaDiCaL 單核：`--preset full --solver deps/cadical/build/cadical --tag cadical_1c`
-  - Painless 32 緒：`--preset full --solver deps/painless/painless --solver-cpus 32 --tag painless_32t`
+- [ ] **0.5** 跑 Baseline：full preset（`--preset full`，400 instances × 1000s，兩年分開跑）
+  - SC2023: `--preset full --benchmarks benchmarks/sc2023/instances.csv --solver deps/cadical/build/cadical --tag cadical_sc2023`
+  - SC2024: `--preset full --benchmarks benchmarks/sc2024/instances.csv --solver deps/cadical/build/cadical --tag cadical_sc2024`
+  - Painless 32 緒同理
   - 保存結果至 `results/baseline/`
   - 預估耗時：數小時至數十小時
 
