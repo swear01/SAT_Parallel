@@ -39,8 +39,8 @@ bash scripts/setup_env.sh
 
 | 步驟 | 說明 |
 |------|------|
-| 1 | 驗證系統工具（gcc, cmake, git, GPU） |
-| 2 | 安裝 CUDA 12.4 toolkit 至 `~/.local/cuda-12.4`（本地，不需 sudo） |
+| 1 | 驗證系統工具（gcc, cmake, git, GPU, CUDA >= 12.x） |
+| 2 | 偵測系統 CUDA toolkit（需 >= 12.x，支援 sm_89） |
 | 3 | 編譯安裝 OpenMPI 5.0.6 至 `deps/local/openmpi/` |
 | 4 | 克隆並編譯 CaDiCaL 求解器 |
 | 5 | 克隆並編譯 Painless 平行框架（含 10 個子求解器） |
@@ -50,13 +50,7 @@ bash scripts/setup_env.sh
 
 腳本可重複執行，已完成的步驟會自動跳過。
 
-若要跳過 CUDA 12 下載（約 4.5 GB），可使用：
-
-```bash
-bash scripts/setup_env.sh --skip-cuda
-```
-
-此模式下會使用系統 CUDA 11.5 搭配 sm_86 PTX forward compatibility（運行時 JIT 編譯至 sm_89）。
+**前置條件：** 系統需已安裝 CUDA toolkit >= 12.x（支援 sm_89 原生編譯）。
 
 ### 3. 載入環境
 
@@ -223,12 +217,8 @@ SAT_Parallel/
 
 本專案設計目標為 NVIDIA RTX 4090（Ada Lovelace, Compute Capability 8.9）。
 
-| CUDA 版本 | SM 架構 | 說明 |
-|-----------|---------|------|
-| 12.4（建議） | `sm_89` | 原生支援 RTX 4090，最佳效能 |
-| 11.5（系統內建） | `sm_86` PTX | 透過 forward compatibility JIT 至 sm_89，首次啟動稍慢 |
-
-環境變數 `SM_ARCH` 與 `CUDA_ARCH_FLAG` 會由 `env.sh` 自動設定。
+- 需要 CUDA toolkit >= 12.x，使用 sm_89 原生編譯（不使用 PTX fallback）。
+- 環境變數 `SM_ARCH` 與 `CUDA_ARCH_FLAG` 會由 `env.sh` 自動設定。
 
 ---
 

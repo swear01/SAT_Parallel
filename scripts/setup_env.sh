@@ -4,8 +4,8 @@
 # ==============================================================================
 #
 # Sets up the complete build environment for SAT_Parallel:
-#   1. Validate system prerequisites (gcc, cmake, git, GPU)
-#   2. Install local CUDA 12.4 toolkit (RTX 4090 needs CC 8.9)
+#   1. Validate system prerequisites (gcc, cmake, git, GPU, CUDA >= 12.x)
+#   2. Detect system CUDA toolkit (requires CUDA >= 12.x for native sm_89)
 #   3. Install OpenMPI locally (required by Painless)
 #   4. Build CaDiCaL solver from source
 #   5. Build Painless parallel framework (with all bundled solvers)
@@ -13,11 +13,10 @@
 #   7. Create Python virtual environment with analysis packages
 #   8. Generate env.sh for future sessions
 #
-# No root/sudo required — everything installs locally.
+# Prerequisites: CUDA toolkit >= 12.x must be installed system-wide.
 #
 # Usage:
-#   bash scripts/setup_env.sh               # full install
-#   bash scripts/setup_env.sh --skip-cuda   # skip CUDA 12 download
+#   bash scripts/setup_env.sh
 # ==============================================================================
 
 set -euo pipefail
@@ -40,19 +39,11 @@ section() { echo -e "\n${CYAN}========== $* ==========${NC}\n"; }
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPS_DIR="$PROJECT_ROOT/deps"
 LOCAL_PREFIX="$DEPS_DIR/local"
-CUDA_LOCAL="$HOME/.local/cuda-12.4"
 OPENMPI_PREFIX="$LOCAL_PREFIX/openmpi"
 VENV_DIR="$PROJECT_ROOT/.venv"
 ENV_FILE="$PROJECT_ROOT/env.sh"
 NPROC=$(nproc 2>/dev/null || echo 4)
 JOBS=$(( NPROC > 8 ? 8 : NPROC ))
-
-SKIP_CUDA=false
-for arg in "$@"; do
-    case "$arg" in
-        --skip-cuda) SKIP_CUDA=true ;;
-    esac
-done
 
 mkdir -p "$DEPS_DIR" "$LOCAL_PREFIX"/{lib,include,bin}
 
@@ -90,79 +81,40 @@ else
 fi
 
 # ==============================================================================
-section "2/8  CUDA Toolkit"
+section "2/8  CUDA Toolkit (detect system install)"
 # ==============================================================================
 
-CUDA_VERSION_NEEDED="12.4"
-CUDA_RUNFILE_URL="https://developer.download.nvidia.com/compute/cuda/12.4.1/local_installers/cuda_12.4.1_550.54.15_linux.run"
+CUDA_SEARCH_PATHS=(
+    "/usr/local/cuda/bin/nvcc"
+    "/usr/local/cuda-12.8/bin/nvcc"
+    "/usr/local/cuda-12.6/bin/nvcc"
+    "/usr/local/cuda-12.4/bin/nvcc"
+)
 
-need_local_cuda() {
-    [ -x "$CUDA_LOCAL/bin/nvcc" ] && return 1
-    local sys_nvcc
-    sys_nvcc=$(nvcc --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//')
-    [ -z "$sys_nvcc" ] && return 0
-    local major minor
-    major=$(echo "$sys_nvcc" | cut -d. -f1)
-    minor=$(echo "$sys_nvcc" | cut -d. -f2)
-    [ "$major" -lt 11 ] || { [ "$major" -eq 11 ] && [ "$minor" -lt 8 ]; } && return 0
-    return 1
-}
-
-if [ "$SKIP_CUDA" = true ]; then
-    warn "Skipping CUDA toolkit installation (--skip-cuda)"
-    if [ -x "$CUDA_LOCAL/bin/nvcc" ]; then
-        CUDA_HOME="$CUDA_LOCAL"
-    else
-        CUDA_HOME="/usr"
+CUDA_HOME=""
+for p in "${CUDA_SEARCH_PATHS[@]}"; do
+    if [ -x "$p" ]; then
+        CUDA_HOME="$(dirname "$(dirname "$p")")"
+        break
     fi
-elif need_local_cuda; then
-    info "System CUDA toolkit is too old for RTX 4090 (CC 8.9)"
-    info "Installing CUDA $CUDA_VERSION_NEEDED locally to $CUDA_LOCAL ..."
+done
 
-    CUDA_RUNFILE="$DEPS_DIR/cuda_${CUDA_VERSION_NEEDED}.run"
-    if [ ! -f "$CUDA_RUNFILE" ]; then
-        info "Downloading CUDA $CUDA_VERSION_NEEDED runfile (~4.5 GB) ..."
-        wget -q --show-progress -O "$CUDA_RUNFILE" "$CUDA_RUNFILE_URL"
-    else
-        info "CUDA runfile already downloaded, skipping"
-    fi
-
-    info "Extracting CUDA toolkit (toolkit only, no driver) ..."
-    mkdir -p "$CUDA_LOCAL"
-    bash "$CUDA_RUNFILE" --toolkit --toolkitpath="$CUDA_LOCAL" \
-         --silent --no-man-page --no-opengl-libs 2>/dev/null || true
-
-    if [ -x "$CUDA_LOCAL/bin/nvcc" ]; then
-        ok "CUDA $CUDA_VERSION_NEEDED installed at $CUDA_LOCAL"
-        CUDA_HOME="$CUDA_LOCAL"
-    else
-        warn "CUDA local install may have had issues — falling back to system CUDA"
-        warn "GPU code will use sm_86 forward compatibility (PTX JIT for sm_89)"
-        CUDA_HOME="/usr"
-    fi
-else
-    if [ -x "$CUDA_LOCAL/bin/nvcc" ]; then
-        CUDA_HOME="$CUDA_LOCAL"
-    else
-        CUDA_HOME="/usr"
-    fi
-    ok "CUDA toolkit is sufficient"
+if [ -z "$CUDA_HOME" ]; then
+    fail "No CUDA toolkit found. Install CUDA 12.x (>= 12.4) with sm_89 support for RTX 4090."
 fi
 
 NVCC_BIN="${CUDA_HOME}/bin/nvcc"
-if [ -x "$NVCC_BIN" ]; then
-    NVCC_VER=$("$NVCC_BIN" --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//')
-    ok "nvcc $NVCC_VER at $NVCC_BIN"
+NVCC_VER=$("$NVCC_BIN" --version 2>/dev/null | grep "release" | sed 's/.*release //' | sed 's/,.*//')
+NVCC_MAJOR=$(echo "$NVCC_VER" | cut -d. -f1)
+
+if [ "$NVCC_MAJOR" -lt 12 ]; then
+    fail "CUDA $NVCC_VER is too old. Need CUDA >= 12.x for native sm_89 (RTX 4090)."
 fi
 
-if [ -x "$CUDA_LOCAL/bin/nvcc" ]; then
-    CUDA_ARCH_FLAG="-gencode arch=compute_89,code=sm_89"
-    SM_ARCH="89"
-else
-    CUDA_ARCH_FLAG="-gencode arch=compute_86,code=compute_86"
-    SM_ARCH="86"
-    warn "Using sm_86 PTX (JIT-compiled for RTX 4090 at runtime)"
-fi
+ok "nvcc $NVCC_VER at $NVCC_BIN"
+
+CUDA_ARCH_FLAG="-gencode arch=compute_89,code=sm_89"
+SM_ARCH="89"
 
 # ==============================================================================
 section "3/8  OpenMPI (local install)"

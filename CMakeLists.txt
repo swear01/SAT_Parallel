@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.18)
+
+# RTX 4090 = SM 89 (Ada Lovelace), native compilation with CUDA 12.8
+# Must be set before project() so CMake doesn't override with defaults
+set(CMAKE_CUDA_ARCHITECTURES 89)
+
 project(SAT_Parallel LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -14,12 +19,6 @@ endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 set(CMAKE_CXX_FLAGS_DEBUG   "-O0 -g -fsanitize=address")
 
-# ---------- CUDA architecture ----------
-# RTX 4090 = SM 89 (Ada Lovelace)
-# Falls back to SM 86 PTX if older toolkit
-if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES 86 89)
-endif()
 message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 
 # ---------- threads ----------
