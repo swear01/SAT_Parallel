@@ -106,15 +106,12 @@
 
 > **目標：** 實作 Master 角色邏輯，整合進 Painless 框架。
 
-- [ ] **4.1** Master 主迴圈 (`src/master/master.cpp`)
-  - 接收 Delta Patch → 更新 DSRG
-  - 定期執行中心性計算
-  - 廣播 Top-K 權重 + 共享 clauses
-- [ ] **4.2** 社群偵測：Louvain (`src/master/community.cpp`)
-- [ ] **4.3** 圖切割 → Cube 生成 (`src/master/partitioner.cpp`)
-  - 跨社群邊 → cut variables → cube 分配
-- [ ] **4.4** Work stealing 邏輯
-- [ ] **4.5** 整合至 Painless sharing strategy 層
+- [x] **4.1** Master 主迴圈 (`src/master/master.cpp`) — tick() 驅動：drain DeltaPatch + GPU report → 定期 centrality + GC + broadcast
+- [x] **4.2** 社群偵測：Louvain + Label Propagation (`src/master/community.cpp`) — 含 modularity gain 優化、compact community IDs
+- [x] **4.3** 圖切割 → Cube 生成 (`src/master/partitioner.cpp`) — cut variable 權重排序 → 2^k cubes → round-robin 分配
+- [x] **4.4** Work stealing (`src/master/work_stealing.h`) — thread-safe cube 管理、SAT 早停
+- [x] **4.5** Painless sharing strategy 介面 (`src/master/sharing_strategy.h`) — DSRGSharingStrategy 封裝完整 pipeline
+- [x] **4.6** 單元測試 — 12 tests PASS（Master tick / community / partitioner / work stealing / e2e）
 
 ---
 

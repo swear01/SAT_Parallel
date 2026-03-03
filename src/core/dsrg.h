@@ -90,6 +90,11 @@ public:
         }
     }
 
+    void set_community_id(uint32_t clause_id, int community_id) {
+        auto it = nodes_.find(clause_id);
+        if (it != nodes_.end()) it->second.community_id = community_id;
+    }
+
     const DSRGConfig& config() const { return config_; }
 
 private:

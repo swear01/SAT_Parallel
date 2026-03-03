@@ -63,6 +63,15 @@ else()
     message(STATUS "No core sources yet — dsrg_core skipped")
 endif()
 
+# ---------- master_lib static library ----------
+file(GLOB_RECURSE MASTER_LIB_SRC src/master/*.cpp)
+if(MASTER_LIB_SRC AND TARGET dsrg_core)
+    add_library(master_lib STATIC ${MASTER_LIB_SRC})
+    target_include_directories(master_lib PUBLIC ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(master_lib PUBLIC dsrg_core Threads::Threads)
+    message(STATUS "master_lib sources: ${MASTER_LIB_SRC}")
+endif()
+
 # ---------- source groups (for main executable) ----------
 file(GLOB_RECURSE MASTER_SRC  src/master/*.cpp src/master/*.h)
 file(GLOB_RECURSE WORKER_SRC  src/worker/*.cpp src/worker/*.h)
@@ -144,4 +153,13 @@ if(TARGET dsrg_core)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
     add_test(NAME CommUnitTests COMMAND comm_test)
+endif()
+
+if(TARGET master_lib)
+    add_executable(master_test tests/master/master_test.cpp)
+    target_link_libraries(master_test PRIVATE master_lib GTest::gtest_main)
+    set_target_properties(master_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+    add_test(NAME MasterUnitTests COMMAND master_test)
 endif()
