@@ -21,7 +21,7 @@ struct MasterConfig {
     CentralityConfig   centrality;
     AggregationConfig  aggregation;
 
-    int   centrality_interval      = 5000;   // conflicts between centrality runs
+    int   centrality_interval      = 5000;
     int   gc_interval              = 10000;
     int   broadcast_interval_ms    = 1000;
     float gpu_hotzone_boost        = 2.0f;
@@ -38,15 +38,9 @@ public:
                     BroadcastChannel& broadcast_channel,
                     GPUChannel& gpu_channel);
 
-    // Main entry point: process one batch of pending work.
-    // Call from the master thread's event loop.
-    // Returns the total number of delta patches + GPU reports processed.
     size_t tick();
-
-    // Force a centrality compute + broadcast cycle (for testing).
     void force_centrality_and_broadcast();
 
-    // Accessors for testing / integration.
     const DSRG& graph() const { return graph_; }
     DSRG& graph() { return graph_; }
     uint64_t total_conflicts_seen() const { return total_conflicts_; }
@@ -84,8 +78,9 @@ private:
     std::unordered_map<uint32_t, float> clause_centrality_;
     std::unordered_map<uint32_t, float> var_scores_;
 
-    // Accumulate high-quality clauses for GPU push.
     std::vector<GPUClausePush::Clause> gpu_clause_buffer_;
+
+    std::unordered_map<uint32_t, std::vector<int>> clause_literals_;
 };
 
 }  // namespace sat_parallel

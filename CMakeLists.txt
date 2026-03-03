@@ -35,8 +35,8 @@ list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/deps/local")
 find_package(yaml-cpp REQUIRED)
 message(STATUS "yaml-cpp found: ${yaml-cpp_DIR}")
 
-# ---------- CaDiCaL ----------
-set(CADICAL_DIR "${CMAKE_SOURCE_DIR}/deps/cadical")
+# ---------- CaDiCaL (Painless-modified, supports clause import) ----------
+set(CADICAL_DIR "${CMAKE_SOURCE_DIR}/deps/painless/solvers/cadical")
 set(CADICAL_INCLUDE "${CADICAL_DIR}/src")
 set(CADICAL_LIB "${CADICAL_DIR}/build/libcadical.a")
 
@@ -44,7 +44,7 @@ if(NOT EXISTS "${CADICAL_LIB}")
     message(FATAL_ERROR "CaDiCaL library not found at ${CADICAL_LIB}\n"
                         "Run: bash scripts/setup_env.sh")
 endif()
-message(STATUS "CaDiCaL: ${CADICAL_LIB}")
+message(STATUS "CaDiCaL (Painless): ${CADICAL_LIB}")
 
 add_library(cadical STATIC IMPORTED)
 set_target_properties(cadical PROPERTIES
@@ -82,45 +82,23 @@ if(GPU_LIB_SRC AND TARGET dsrg_core)
     message(STATUS "gpu_lib sources: ${GPU_LIB_SRC}")
 endif()
 
-# ---------- source groups (for main executable) ----------
-file(GLOB_RECURSE MASTER_SRC  src/master/*.cpp src/master/*.h)
-file(GLOB_RECURSE WORKER_SRC  src/worker/*.cpp src/worker/*.h)
-file(GLOB_RECURSE COMM_SRC    src/comm/*.cpp src/comm/*.h)
-file(GLOB_RECURSE SOLVER_SRC  src/solver/*.cpp src/solver/*.h)
-file(GLOB_RECURSE GPU_SRC     src/gpu/*.cu src/gpu/*.cuh src/gpu/*.h)
-
-set(ALL_CPP_SRC
-    ${CORE_SRC} ${MASTER_SRC} ${WORKER_SRC}
-    ${COMM_SRC} ${SOLVER_SRC}
-)
-
-# ---------- main executable ----------
-# Only build when a main entry point exists.
+# ---------- main executable (no GPU dependency) ----------
 set(MAIN_ENTRY "${CMAKE_SOURCE_DIR}/src/main.cpp")
-if(EXISTS "${MAIN_ENTRY}" AND (ALL_CPP_SRC OR GPU_SRC))
-    add_executable(sat_parallel
-        ${ALL_CPP_SRC}
-        ${GPU_SRC}
-    )
-
-    target_include_directories(sat_parallel PRIVATE
-        ${CMAKE_SOURCE_DIR}/src
-        ${CUDAToolkit_INCLUDE_DIRS}
-    )
-
+if(EXISTS "${MAIN_ENTRY}" AND TARGET master_lib)
+    add_executable(sat_parallel ${MAIN_ENTRY})
+    target_include_directories(sat_parallel PRIVATE ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(sat_parallel PRIVATE
+        master_lib
         cadical
         yaml-cpp::yaml-cpp
         Threads::Threads
-        CUDA::cudart
-        CUDA::curand
     )
-
     set_target_properties(sat_parallel PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
+    message(STATUS "sat_parallel target configured")
 else()
-    message(STATUS "No source files yet — skipping target (add .cpp/.cu files to src/)")
+    message(STATUS "Skipping sat_parallel (main.cpp or master_lib not found)")
 endif()
 
 # ---------- testing ----------

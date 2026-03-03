@@ -65,15 +65,15 @@ def print_summary(label, m):
     print("=" * 55)
     print(f"  {label}")
     print("=" * 55)
-    print(f"  Total instances     : {m["total"]}")
-    print(f"  Solved              : {m["solved"]}  (SAT={m["sat"]}, UNSAT={m["unsat"]})")
-    print(f"  Timeout             : {m["timeout"]}")
-    print(f"  Error/Unknown       : {m["error"]}")
+    print(f'  Total instances     : {m["total"]}')
+    print(f'  Solved              : {m["solved"]}  (SAT={m["sat"]}, UNSAT={m["unsat"]})')
+    print(f'  Timeout             : {m["timeout"]}')
+    print(f'  Error/Unknown       : {m["error"]}')
     if m["wrong"] > 0:
-        print(f"  ** WRONG ANSWERS ** : {m["wrong"]}")
-    print(f"  PAR-2               : {m["par2"]}")
-    print(f"  Mean  solve time    : {m["mean_time"]}s")
-    print(f"  Median solve time   : {m["median_time"]}s")
+        print(f'  ** WRONG ANSWERS ** : {m["wrong"]}')
+    print(f'  PAR-2               : {m["par2"]}')
+    print(f'  Mean  solve time    : {m["mean_time"]}s')
+    print(f'  Median solve time   : {m["median_time"]}s')
     print("=" * 55)
 
 
@@ -82,10 +82,12 @@ def print_comparison_table(all_data, timeout):
     print("=" * 80)
     print(f"  COMPARISON TABLE  (timeout={timeout}s)")
     print("=" * 80)
-    print(f"{"Solver":<30} {"Solved":>7} {"SAT":>5} {"UNSAT":>6} {"PAR-2":>10} {"Median":>8}")
+    header = f'{"Solver":<30} {"Solved":>7} {"SAT":>5} {"UNSAT":>6} {"PAR-2":>10} {"Median":>8}'
+    print(header)
     print("-" * 80)
     for label, m in sorted(all_data.items(), key=lambda x: x[1]["par2"]):
-        print(f"{label:<30} {m["solved"]:>7} {m["sat"]:>5} {m["unsat"]:>6} {m["par2"]:>10.2f} {m["median_time"]:>7.1f}s")
+        row = f'{label:<30} {m["solved"]:>7} {m["sat"]:>5} {m["unsat"]:>6} {m["par2"]:>10.2f} {m["median_time"]:>7.1f}s'
+        print(row)
     print("=" * 80)
 
 

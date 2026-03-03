@@ -88,6 +88,8 @@ void Master::apply_delta_patch(DeltaPatch& patch) {
         graph_.add_node(cl.clause_id, cl.literals, cl.lbd,
                         false, patch.conflict_count);
 
+        clause_literals_[cl.clause_id] = cl.literals;
+
         if (cl.lbd <= config_.learnt_clause_lbd_filter) {
             gpu_clause_buffer_.push_back({cl.clause_id, cl.literals, cl.lbd});
         }
@@ -124,7 +126,6 @@ void Master::run_centrality_and_broadcast() {
         graph_, clause_centrality_, config_.aggregation);
 
     auto top_vars = select_top_k(var_scores_, config_.aggregation.top_k);
-
     auto top_clauses = select_top_k(clause_centrality_, config_.top_k_clauses);
 
     GlobalBroadcast bcast;
@@ -136,6 +137,10 @@ void Master::run_centrality_and_broadcast() {
 
     for (const auto& [cid, weight] : top_clauses) {
         bcast.top_k_clause_weights.push_back({cid, weight});
+        auto it = clause_literals_.find(cid);
+        if (it != clause_literals_.end()) {
+            bcast.shared_clauses.push_back(it->second);
+        }
     }
 
     broadcast_channel_.publish(std::move(bcast));

@@ -41,6 +41,8 @@ def detect_solver_type(solver_path):
     name = Path(solver_path).name.lower()
     if "painless" in name:
         return "painless"
+    if "sat_parallel" in name:
+        return "sat_parallel"
     if "cadical" in name:
         return "cadical"
     return "generic"
@@ -51,6 +53,8 @@ def build_command(solver_path, cnf_path, timeout, solver_cpus, solver_type):
     cmd = [str(solver_path)]
 
     if solver_type == "painless":
+        cmd.extend([f"-c={solver_cpus}", f"-t={timeout}"])
+    elif solver_type == "sat_parallel":
         cmd.extend([f"-c={solver_cpus}", f"-t={timeout}"])
     elif solver_type == "cadical":
         cmd.extend(["-t", str(timeout)])
