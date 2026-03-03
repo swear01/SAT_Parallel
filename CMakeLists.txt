@@ -136,4 +136,12 @@ if(TARGET dsrg_core)
     set_target_properties(dsrg_bench PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
+
+    add_executable(comm_test tests/comm/comm_test.cpp)
+    target_include_directories(comm_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(comm_test PRIVATE GTest::gtest_main Threads::Threads)
+    set_target_properties(comm_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+    add_test(NAME CommUnitTests COMMAND comm_test)
 endif()

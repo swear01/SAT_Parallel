@@ -94,11 +94,11 @@
 
 > **目標：** 建立 Master / Worker / GPU 之間的非同步通訊基礎。
 
-- [ ] **3.1** Lock-free MPSC queue (`src/comm/mpsc_queue.h`)
-- [ ] **3.2** Delta Patch 結構與序列化 (`src/comm/delta_patch.h`)
-- [ ] **3.3** GlobalBroadcast 結構與共享記憶體傳輸 (`src/comm/broadcast.h`)
-- [ ] **3.4** GPU pinned memory 通訊介面 (`src/comm/gpu_channel.h`)
-- [ ] **3.5** 通訊層壓力測試（throughput / latency）
+- [x] **3.1** Lock-free MPSC queue (`src/comm/mpsc_queue.h`) — Vyukov wait-free push / lock-free pop
+- [x] **3.2** Delta Patch 結構與序列化 (`src/comm/delta_patch.h`) — 含 estimated_size_bytes() budget 檢查
+- [x] **3.3** GlobalBroadcast + BroadcastChannel (`src/comm/broadcast.h`) — mutex-guarded shared_ptr (GCC 11)
+- [x] **3.4** GPU pinned memory 通訊介面 (`src/comm/gpu_channel.h`) — MPSC (GPU→Master) + single-slot (Master→GPU)
+- [x] **3.5** 通訊層單元測試 + 壓力測試 — 13 tests PASS, MPSC 26.5 M ops/s
 
 ---
 
