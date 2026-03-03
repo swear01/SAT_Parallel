@@ -8,7 +8,7 @@ project(SAT_Parallel LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 20)
+set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -70,6 +70,16 @@ if(MASTER_LIB_SRC AND TARGET dsrg_core)
     target_include_directories(master_lib PUBLIC ${CMAKE_SOURCE_DIR}/src)
     target_link_libraries(master_lib PUBLIC dsrg_core Threads::Threads)
     message(STATUS "master_lib sources: ${MASTER_LIB_SRC}")
+endif()
+
+# ---------- gpu_lib static library ----------
+file(GLOB_RECURSE GPU_LIB_SRC src/gpu/*.cu)
+if(GPU_LIB_SRC AND TARGET dsrg_core)
+    add_library(gpu_lib STATIC ${GPU_LIB_SRC})
+    target_include_directories(gpu_lib PUBLIC ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(gpu_lib PUBLIC dsrg_core CUDA::cudart CUDA::curand Threads::Threads)
+    set_target_properties(gpu_lib PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    message(STATUS "gpu_lib sources: ${GPU_LIB_SRC}")
 endif()
 
 # ---------- source groups (for main executable) ----------
@@ -170,4 +180,15 @@ if(TARGET master_lib)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
     add_test(NAME WorkerUnitTests COMMAND worker_test)
+endif()
+
+if(TARGET gpu_lib)
+    add_executable(gpu_test tests/gpu/gpu_test.cu)
+    target_include_directories(gpu_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(gpu_test PRIVATE gpu_lib GTest::gtest_main)
+    set_target_properties(gpu_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        CUDA_SEPARABLE_COMPILATION ON
+    )
+    add_test(NAME GPUUnitTests COMMAND gpu_test)
 endif()

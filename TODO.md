@@ -131,11 +131,11 @@
 
 > **目標：** 在 GPU 上持續執行 WalkSAT，回傳 hotzone 與 phase hints。
 
-- [ ] **6.1** CUDA WalkSAT kernel (`src/gpu/walksat_kernel.cu`)
-- [ ] **6.2** GPU clause DB 管理（pinned memory 傳入新 learnt clauses）
-- [ ] **6.3** Hotzone 回報（最常卡住的 clause IDs + 頻率）
-- [ ] **6.4** Phase Hints 回報（局部最佳賦值）
-- [ ] **6.5** GPU ↔ Master 整合測試
+- [x] **6.1** CUDA WalkSAT kernel (`src/gpu/walksat_kernel.cu`) — noise/greedy flip、reservoir sampling 選 unsat clause、atomicAdd hotzone 統計
+- [x] **6.2** GPU clause DB 管理 (`src/gpu/gpu_prober.cu`) — flat packed 格式、動態追加 learnt clauses、cudaMalloc/cudaMemcpy
+- [x] **6.3** Hotzone 回報 — top-K unsat frequency clauses → GPUReport → GPUChannel
+- [x] **6.4** Phase Hints 回報 — 最低 unsat_count 執行緒的 best assignment → GPUReport.best_assignment
+- [x] **6.5** GPU ↔ Master 整合測試 — 5 tests PASS（load/run/report/dynamic push/hotzone content）
 
 ---
 
