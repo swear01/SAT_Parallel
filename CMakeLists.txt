@@ -124,6 +124,13 @@ if(TARGET dsrg_core)
     )
     add_test(NAME DSRGUnitTests COMMAND dsrg_test)
 
+    add_executable(centrality_test tests/core/centrality_test.cpp)
+    target_link_libraries(centrality_test PRIVATE dsrg_core GTest::gtest_main)
+    set_target_properties(centrality_test PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+    add_test(NAME CentralityUnitTests COMMAND centrality_test)
+
     add_executable(dsrg_bench tests/core/dsrg_bench.cpp)
     target_link_libraries(dsrg_bench PRIVATE dsrg_core)
     set_target_properties(dsrg_bench PROPERTIES

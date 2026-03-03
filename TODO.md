@@ -79,13 +79,14 @@
 
 > **目標：** 從 DSRG 計算出變數分數，可與 VSIDS 混合。
 
-- [ ] **2.1** 加權 Degree Centrality (`src/core/centrality.cpp`)
-- [ ] **2.2** 近似 PageRank（選項 B，進階）
-- [ ] **2.3** Clause → Variable 聚合 (`src/core/aggregation.cpp`)
-  - Weighted Sum: `Score(v) = Σ α · Centrality(c) · W_node(c)`
-- [ ] **2.4** VSIDS 混合公式
+- [x] **2.1** 加權 Degree Centrality (`src/core/centrality.h`, `src/core/centrality.cpp`)
+- [x] **2.2** 近似 PageRank（Power Iteration, damping/epsilon/max_iter 從 YAML 載入）
+- [x] **2.3** Clause → Variable 聚合 (`src/core/aggregation.h`, `src/core/aggregation.cpp`)
+  - 支援 weighted_sum / sum / max 三種方法
+  - Top-K 變數選取（`select_top_k`）
+- [x] **2.4** VSIDS 混合公式（`mix_with_vsids`）
   - `Final_Score(v) = (1 - λ) · VSIDS(v) + λ · GraphScore(v)`
-- [ ] **2.5** 單元測試 + 正確性驗證
+- [x] **2.5** 單元測試 + 正確性驗證 (`tests/core/centrality_test.cpp`) — 25 tests PASS
 
 ---
 
