@@ -63,42 +63,15 @@ else()
     message(STATUS "No core sources yet — dsrg_core skipped")
 endif()
 
-# ---------- master_lib static library ----------
-file(GLOB_RECURSE MASTER_LIB_SRC src/master/*.cpp)
-if(MASTER_LIB_SRC AND TARGET dsrg_core)
-    add_library(master_lib STATIC ${MASTER_LIB_SRC})
-    target_include_directories(master_lib PUBLIC ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(master_lib PUBLIC dsrg_core Threads::Threads)
-    message(STATUS "master_lib sources: ${MASTER_LIB_SRC}")
-endif()
-
 # ---------- gpu_lib static library ----------
 file(GLOB_RECURSE GPU_LIB_SRC src/gpu/*.cu)
 if(GPU_LIB_SRC AND TARGET dsrg_core)
     add_library(gpu_lib STATIC ${GPU_LIB_SRC})
     target_include_directories(gpu_lib PUBLIC ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(gpu_lib PUBLIC dsrg_core CUDA::cudart CUDA::curand Threads::Threads)
-    set_target_properties(gpu_lib PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+    target_link_libraries(gpu_lib PUBLIC dsrg_core CUDA::cudart CUDA::curand Threads::Threads yaml-cpp::yaml-cpp)
+    # OFF = no device link step needed when linking with g++ (e.g. Painless Makefile)
+    set_target_properties(gpu_lib PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
     message(STATUS "gpu_lib sources: ${GPU_LIB_SRC}")
-endif()
-
-# ---------- main executable (no GPU dependency) ----------
-set(MAIN_ENTRY "${CMAKE_SOURCE_DIR}/src/main.cpp")
-if(EXISTS "${MAIN_ENTRY}" AND TARGET master_lib)
-    add_executable(sat_parallel ${MAIN_ENTRY})
-    target_include_directories(sat_parallel PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(sat_parallel PRIVATE
-        master_lib
-        cadical
-        yaml-cpp::yaml-cpp
-        Threads::Threads
-    )
-    set_target_properties(sat_parallel PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    )
-    message(STATUS "sat_parallel target configured")
-else()
-    message(STATUS "Skipping sat_parallel (main.cpp or master_lib not found)")
 endif()
 
 # ---------- testing ----------
@@ -134,39 +107,14 @@ if(TARGET dsrg_core)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
 
-    add_executable(comm_test tests/comm/comm_test.cpp)
-    target_include_directories(comm_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(comm_test PRIVATE GTest::gtest_main Threads::Threads)
-    set_target_properties(comm_test PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    )
-    add_test(NAME CommUnitTests COMMAND comm_test)
-endif()
-
-if(TARGET master_lib)
-    add_executable(master_test tests/master/master_test.cpp)
-    target_link_libraries(master_test PRIVATE master_lib GTest::gtest_main)
-    set_target_properties(master_test PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    )
-    add_test(NAME MasterUnitTests COMMAND master_test)
-
-    add_executable(worker_test tests/worker/worker_test.cpp)
-    target_include_directories(worker_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(worker_test PRIVATE master_lib GTest::gtest_main)
-    set_target_properties(worker_test PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    )
-    add_test(NAME WorkerUnitTests COMMAND worker_test)
-endif()
-
-if(TARGET gpu_lib)
-    add_executable(gpu_test tests/gpu/gpu_test.cu)
-    target_include_directories(gpu_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_link_libraries(gpu_test PRIVATE gpu_lib GTest::gtest_main)
-    set_target_properties(gpu_test PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-        CUDA_SEPARABLE_COMPILATION ON
-    )
-    add_test(NAME GPUUnitTests COMMAND gpu_test)
+    if(TARGET gpu_lib)
+        add_executable(gpu_test tests/gpu/gpu_test.cu)
+        target_include_directories(gpu_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+        target_link_libraries(gpu_test PRIVATE gpu_lib GTest::gtest_main)
+        set_target_properties(gpu_test PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+            CUDA_SEPARABLE_COMPILATION ON
+        )
+        add_test(NAME GPUUnitTests COMMAND gpu_test)
+    endif()
 endif()

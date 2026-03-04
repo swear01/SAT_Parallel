@@ -32,6 +32,7 @@ struct GPUClausePush {
         int lbd;
     };
     std::vector<Clause> clauses;
+    int num_vars = 0;  // max variable id; 0 = derive from literals
 };
 
 // Communication channel between Master and GPU Prober.

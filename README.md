@@ -1,6 +1,7 @@
 # SAT-Parallel
 
-> DSRG (Dynamic Semantic Resolution Graph) 驅動的多核心平行 SAT 求解器
+> DSRG (Dynamic Semantic Resolution Graph) 驅動的多核心平行 SAT 求解器。  
+> 現採用 **Painless + DSRGSharing**（shr-strat=4），透過 CaDiCaL Tracer 建立 co-conflict 邊引導 phase。
 
 ---
 
@@ -154,13 +155,15 @@ python scripts/score.py results/baseline/*.csv --timeout 1000 --output-dir resul
 SAT_Parallel/
 ├── README.md                     # 本文件
 ├── RESEARCH_PLAN.md              # 架構設計與決策
+├── TODO.md                       # 階段任務與進度
 ├── CMakeLists.txt                # 建置系統
 ├── env.sh                        # 環境變數（source 此檔）
 ├── requirements.txt              # Python 套件清單
 ├── config/
-│   └── default_params.yaml       # 所有可調參數
+│   └── default_params.yaml       # DSRG / centrality 可調參數
 ├── docs/
-│   └── IMPL_DETAILS.md           # 資料結構、公式、通訊協定
+│   ├── IMPL_DETAILS.md           # 資料結構、公式、GC 規則
+│   └── DSRG_USAGE_SUMMARY.md     # DSRG 使用方式與權重更新
 ├── scripts/
 │   ├── setup_env.sh              # 一鍵安裝腳本
 │   ├── download_benchmarks.py    # 下載 SAT Competition benchmarks
@@ -168,19 +171,13 @@ SAT_Parallel/
 │   └── score.py                  # 計分與分析工具（PAR-2、cactus plot）
 ├── results/                      # benchmark 結果 CSV 與圖表
 ├── src/
-│   ├── core/                     # DSRG 圖、中心性計算、聚合、GC
-│   ├── master/                   # Master 邏輯、社群偵測、廣播
-│   ├── worker/                   # Worker 邏輯、局部權重、Delta Patch
-│   ├── gpu/                      # CUDA WalkSAT、GPU Prober
-│   ├── comm/                     # lock-free queue、shared memory
-│   └── solver/                   # Painless 框架 + CaDiCaL 介接
+│   └── core/                     # DSRG 圖、中心性、聚合、GC（Painless 連結）
 ├── benchmarks/                   # SAT benchmark 實例（各年度獨立目錄）
 │   ├── sc2023/                   # SC2023 main track (400 instances + instances.csv)
 │   └── sc2024/                   # SC2024 main track (400 instances + instances.csv)
 └── deps/                         # 本地建置的依賴（git ignored）
     ├── cadical/                  # CaDiCaL 3.0.0
-    ├── painless/                 # Painless (lip6)
-    ├── yaml-cpp/                 # yaml-cpp 0.8.0
+    ├── painless/                 # Painless + DSRGSharing + DSRGCadicalTracer
     └── local/
         ├── openmpi/              # OpenMPI 5.0.6
         ├── lib/                  # 靜態連結庫
@@ -196,10 +193,10 @@ SAT_Parallel/
 | 套件 | 版本 | 用途 |
 |------|------|------|
 | [CaDiCaL](https://github.com/arminbiere/cadical) | 3.0.0 | Worker 底層 CDCL 求解引擎 |
-| [Painless](https://github.com/lip6/painless) | latest | 平行 SAT 框架（Master-Worker 架構） |
+| [Painless](https://github.com/lip6/painless) | latest | 平行 SAT 框架（含 DSRGSharing 整合） |
 | [yaml-cpp](https://github.com/jbeder/yaml-cpp) | 0.8.0 | YAML 設定檔解析 |
 | [OpenMPI](https://www.open-mpi.org/) | 5.0.6 | Painless 所需的 MPI 通訊 |
-| CUDA Toolkit | 11.5 / 12.4 | GPU Prober (WalkSAT) |
+| CUDA Toolkit | 11.5 / 12.4 | CMake 建置需求（專案含 CUDA 設定），benchmark 使用 Painless 無 GPU 求解 |
 
 ### Python（分析用）
 
@@ -224,17 +221,14 @@ SAT_Parallel/
 
 ## 設定參數
 
-所有可調參數定義在 `config/default_params.yaml`，包括：
+可調參數定義在 `config/default_params.yaml`：
 
 - **graph** — DSRG 邊建立/移除閾值、權重衰減率
 - **centrality** — 中心性演算法選擇與參數
 - **decision** — GraphScore 與 VSIDS 混合權重 (λ)
-- **communication** — Delta Patch / Broadcast 間隔與大小
 - **gc** — 圖清理頻率與淘汰條件
-- **partitioning** — 社群偵測演算法與切割參數
-- **gpu** — GPU Prober 回報間隔與 hotzone 大小
 
-詳見 `docs/IMPL_DETAILS.md`。
+詳見 `docs/IMPL_DETAILS.md`、`docs/DSRG_USAGE_SUMMARY.md`。
 
 ---
 
@@ -244,7 +238,3 @@ SAT_Parallel/
 |------|------|
 | Painless — Le Frioux et al., SAT 2017 | 平行框架 |
 | CaDiCaL — Biere et al., SAT Competition 2020 | CDCL 引擎 |
-| TurboSAT — Ozolins et al., 2022 | GPU 加速參考 |
-| WalkSAT — Selman et al., AAAI 1994 | GPU 探測演算法 |
-| Louvain — Blondel et al., JSTAT 2008 | 社群偵測 |
-| Cube-and-Conquer — Heule et al., HVC 2012 | 圖切割參考 |

@@ -2,6 +2,8 @@
 
 > 按階段推進，每個階段有明確的驗收標準。
 
+> **架構變更（2025）：** 獨立 sat_parallel（master/worker/gpu/comm）已棄用並移除。現僅保留 **Painless DSRGSharing** 整合路徑：DSRG 作為 sharing strategy（shr-strat=4），透過 CaDiCaL Tracer 取得 antecedents 建立 co-conflict 邊。benchmark 使用 `deps/painless/painless`。
+
 ---
 
 ## Phase 0 — 測試計分框架 & Baseline 驗證
@@ -90,68 +92,52 @@
 
 ---
 
-## Phase 3 — 通訊層
+## Phase 3 — Co-conflict 邊（Painless 整合）
 
-> **目標：** 建立 Master / Worker / GPU 之間的非同步通訊基礎。
+> **目標：** 在 Painless DSRGSharing 中建立 co-conflict 邊，使中心性計算有效。
 
-- [x] **3.1** Lock-free MPSC queue (`src/comm/mpsc_queue.h`) — Vyukov wait-free push / lock-free pop
-- [x] **3.2** Delta Patch 結構與序列化 (`src/comm/delta_patch.h`) — 含 estimated_size_bytes() budget 檢查
-- [x] **3.3** GlobalBroadcast + BroadcastChannel (`src/comm/broadcast.h`) — mutex-guarded shared_ptr (GCC 11)
-- [x] **3.4** GPU pinned memory 通訊介面 (`src/comm/gpu_channel.h`) — MPSC (GPU→Master) + single-slot (Master→GPU)
-- [x] **3.5** 通訊層單元測試 + 壓力測試 — 13 tests PASS, MPSC 26.5 M ops/s
-
----
-
-## Phase 4 — Master 模組
-
-> **目標：** 實作 Master 角色邏輯，整合進 Painless 框架。
-
-- [x] **4.1** Master 主迴圈 (`src/master/master.cpp`) — tick() 驅動：drain DeltaPatch + GPU report → 定期 centrality + GC + broadcast
-- [x] **4.2** 社群偵測：Louvain + Label Propagation (`src/master/community.cpp`) — 含 modularity gain 優化、compact community IDs
-- [x] **4.3** 圖切割 → Cube 生成 (`src/master/partitioner.cpp`) — cut variable 權重排序 → 2^k cubes → round-robin 分配
-- [x] **4.4** Work stealing (`src/master/work_stealing.h`) — thread-safe cube 管理、SAT 早停
-- [x] **4.5** Painless sharing strategy 介面 (`src/master/sharing_strategy.h`) — DSRGSharingStrategy 封裝完整 pipeline
-- [x] **4.6** 單元測試 — 12 tests PASS（Master tick / community / partitioner / work stealing / e2e）
+- [x] **3.1** AntecedentProvider 介面 (`deps/painless/src/solvers/CDCL/AntecedentProvider.hpp`) — 提供 `getLastDerivation()`
+- [x] **3.2** DSRGCadicalTracer (`DSRGCadicalTracer.hpp/cpp`) — 繼承 CaDiCaL Tracer，在 `add_derived_clause` 時記錄 antecedents
+- [x] **3.3** Cadical 整合 — 建構時 `connect_proof_tracer(dsrgTracer_)`，實作 `getLastDerivation()`
+- [x] **3.4** DSRGSharing 使用 antecedents — `importClause` 取得 derivation，`drainPendingClauses` 呼叫 `record_co_conflict`，維護 `caIdToDsrgId_`
+- [x] **3.5** GC 時清理 `caIdToDsrgId_` 已淘汰節點
 
 ---
 
-## Phase 5 — Worker 模組
+## Phase 4 — GPU Prober 整合（規劃）
 
-> **目標：** 修改 Painless Worker，使其能與 Master 協作。
+> **目標：** 恢復 GPU probing 架構，將其 hotzone 回報納入 DSRGSharing 權重更新流程。詳見 `docs/GPU_PROBER_INTEGRATION_PLAN.md`。
 
-- [x] **5.1** Worker 局部權重維護 (`src/worker/local_weights.h`) — EMA 融合 + VSIDS 混合 + top-K 選取
-- [x] **5.2** Delta Patch 生成邏輯 (`src/worker/patch_builder.h`) — conflict interval / LBD 雙觸發、budget 裁剪 < 4KB
-- [x] **5.3** 接收 Broadcast → 融合全域權重 — `merge_broadcast()` EMA: `W_local = α·W_local + (1-α)·W_global`
-- [x] **5.4** 接收 Cube 分配 → 假設文字轉換 — `set_cube()` → assumption literals
-- [x] **5.5** Worker 引擎整合 (`src/worker/worker_engine.h`) — SolverInterface 抽象、自動 broadcast polling、16 tests PASS
-
----
-
-## Phase 6 — GPU Prober
-
-> **目標：** 在 GPU 上持續執行 WalkSAT，回傳 hotzone 與 phase hints。
-
-- [x] **6.1** CUDA WalkSAT kernel (`src/gpu/walksat_kernel.cu`) — noise/greedy flip、reservoir sampling 選 unsat clause、atomicAdd hotzone 統計
-- [x] **6.2** GPU clause DB 管理 (`src/gpu/gpu_prober.cu`) — flat packed 格式、動態追加 learnt clauses、cudaMalloc/cudaMemcpy
-- [x] **6.3** Hotzone 回報 — top-K unsat frequency clauses → GPUReport → GPUChannel
-- [x] **6.4** Phase Hints 回報 — 最低 unsat_count 執行緒的 best assignment → GPUReport.best_assignment
-- [x] **6.5** GPU ↔ Master 整合測試 — 5 tests PASS（load/run/report/dynamic push/hotzone content）
+- [ ] **4.1** 還原 GPU 相關程式碼（gpu/, comm/mpsc_queue, comm/gpu_channel）
+- [ ] **4.2** DSRGSharing 維護 `dsrgIdToLiterals_`，於 drain/GC 時同步
+- [ ] **4.3** 主程式內由 frequency 計算權重（正規化 / 長度加權 / 純縮放，可調）
+- [ ] **4.4** DSRGSharing 整合：drain hotzone reports → `boost_node(clause_id, weight)`；週期性 push clauses 至 GPU
+- [ ] **4.5** Painless 參數 `-shr-gpu` 與 GPUProber 生命週期管理
+- [ ] **4.6** Benchmark 開/關 GPU prober 比較
 
 ---
 
-## Phase 7 — 端對端整合 & 調參
+## Phase 5 — 端對端整合 & 調參（Painless 路徑）
 
-> **目標：** 完整系統跑通，進行效能比較與消融實驗。
+> **目標：** 用 Painless + DSRGSharing 跑完整 benchmark，與 baseline 比較並調參。
 
-- [ ] **7.1** 端對端整合：Master + Workers + GPU Prober
-- [ ] **7.2** 用 Phase 0 的 benchmark 框架跑完整測試
-- [ ] **7.3** 與 baseline 比較（PAR-2、solved count、cactus plot）
-- [ ] **7.4** 消融實驗（ablation study）
-  - 開/關 DSRG 中心性引導
-  - 開/關 GPU Prober
-  - 開/關圖切割 vs 傳統 Cube-and-Conquer
-  - 調整 λ、decay rate、broadcast interval 等參數
-- [ ] **7.5** 撰寫最終報告
+- [ ] **5.1** 跑 Baseline：Phase 0 full preset（SC2023/SC2024 各 400 instances × 1000s）
+- [ ] **5.2** 與 baseline 比較（PAR-2、solved count、cactus plot）
+- [ ] **5.3** 消融實驗（ablation study）
+  - 開/關 DSRG 中心性引導（shr-strat=4 vs vanilla Painless）
+  - 調整 `dsrgLbdThreshold`、`centralityIntervalRounds`、decay rate 等參數
+- [ ] **5.4** 撰寫 baseline / 改進報告
+
+---
+
+## 已棄用架構（程式碼已移除）
+
+下列 Phase 曾實作並通過測試，但架構決策改為 **僅保留 Painless 整合路徑** 後已移除程式碼，僅作歷史紀錄：
+
+- **原 Phase 3** — 通訊層（MPSC queue、Delta Patch、Broadcast、GPU channel）
+- **原 Phase 4** — Master（社群偵測、圖切割、work stealing、sharing strategy）
+- **原 Phase 5** — Worker（local weights、patch builder、broadcast 融合）
+- **原 Phase 6** — GPU Prober（已規劃以整合方式恢復，見 Phase 4）
 
 ---
 

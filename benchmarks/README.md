@@ -45,3 +45,31 @@ python scripts/download_benchmarks.py --cleanup     # 結束後刪除 .cache、d
 ```
 
 本專案目前只保留 `.cnf`，`.xz` 已刪除以節省約 50% 空間。
+
+---
+
+## 實驗腳本 (run_experiment.sh)
+
+比對 **baseline**（Painless HordeSat `shr-strat=1`）與 **實驗組**（DSRG + GPU `shr-strat=4 -shr-gpu`）。
+
+**重要：** 兩組必須**循序執行**，不可同時跑，避免 GPU/CPU 互相搶佔。
+
+```bash
+# 背景執行（建議）
+nohup bash scripts/run_experiment.sh > results/experiment.log 2>&1 &
+```
+
+驗證是否執行結束：
+
+```bash
+# 無輸出 = 已結束
+pgrep -f "run_experiment.sh" || echo "Experiment completed."
+```
+
+或檢查 log 尾端：
+
+```bash
+tail -10 results/experiment.log
+```
+
+完成後會在 `results/` 產生 `baseline-sample100_*.csv`、`gpu-sample100_*.csv`，並呼叫 `score.py` 輸出 PAR-2 比較。
