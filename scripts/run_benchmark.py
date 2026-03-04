@@ -48,7 +48,8 @@ def detect_solver_type(solver_path):
     return "generic"
 
 
-def build_command(solver_path, cnf_path, timeout, solver_cpus, solver_type):
+def build_command(solver_path, cnf_path, timeout, solver_cpus, solver_type,
+                  extra_args=None):
     """Build the solver command with appropriate arguments."""
     cmd = [str(solver_path)]
 
@@ -59,11 +60,15 @@ def build_command(solver_path, cnf_path, timeout, solver_cpus, solver_type):
     elif solver_type == "cadical":
         cmd.extend(["-t", str(timeout)])
 
+    if extra_args:
+        cmd.extend(extra_args)
+
     cmd.append(str(cnf_path))
     return cmd
 
 
-def run_single(solver_path, cnf_path, timeout, solver_cpus, solver_type):
+def run_single(solver_path, cnf_path, timeout, solver_cpus, solver_type,
+               extra_args=None):
     """Run solver on a single instance. Returns dict with results."""
     cnf = Path(cnf_path)
     if not cnf.exists():
@@ -76,7 +81,8 @@ def run_single(solver_path, cnf_path, timeout, solver_cpus, solver_type):
             "error": f"File not found: {cnf_path}",
         }
 
-    cmd = build_command(solver_path, cnf_path, timeout, solver_cpus, solver_type)
+    cmd = build_command(solver_path, cnf_path, timeout, solver_cpus, solver_type,
+                        extra_args)
 
     wall_limit = timeout + 60
 
@@ -151,6 +157,12 @@ def load_instances(csv_path):
 
 PRESETS = {
     "test": {"timeout": 5, "limit": 10, "desc": "Quick smoke test (5s, 10 instances)"},
+    "sample100": {
+        "timeout": 60,
+        "limit": 100,
+        "benchmarks": "benchmarks/sample100/instances.csv",
+        "desc": "Sub-testbench (60s × 100 instances, 50 SAT + 50 UNSAT)",
+    },
     "full": {"timeout": 1000, "limit": None, "desc": "Full run (1000s, all instances)"},
 }
 
@@ -170,6 +182,8 @@ def main():
                         help="Number of instances to run in parallel (default: 1)")
     parser.add_argument("--tag", type=str, default=None, help="Tag for output filename")
     parser.add_argument("--output-dir", type=str, default=None, help="Output directory (default: results/)")
+    parser.add_argument("--solver-args", type=str, default=None,
+                        help="Extra arguments for the solver (e.g. '-shr-strat=4 -dsrg-lbd=5')")
     args = parser.parse_args()
 
     if args.preset:
@@ -179,6 +193,8 @@ def main():
             args.timeout = p["timeout"]
         if args.limit is None:
             args.limit = p["limit"]
+        if "benchmarks" in p:
+            args.benchmarks = p["benchmarks"]
     if args.timeout is None:
         args.timeout = 1000
 
@@ -214,14 +230,18 @@ def main():
         "solver_type": solver_type,
         "timeout": args.timeout,
         "solver_cpus": args.solver_cpus,
+        "solver_args": args.solver_args or "",
         "parallel": args.parallel,
         "timestamp": timestamp,
         "hostname": platform.node(),
     }
-    log.info("Config: timeout=%ds, solver_cpus=%d, parallel=%d", args.timeout, args.solver_cpus, args.parallel)
+    extra_args = args.solver_args.split() if args.solver_args else None
+    log.info("Config: timeout=%ds, solver_cpus=%d, parallel=%d, solver_args=%s",
+             args.timeout, args.solver_cpus, args.parallel, extra_args)
 
     tasks = [
-        (str(solver_path), inst["cnf_path"], args.timeout, args.solver_cpus, solver_type)
+        (str(solver_path), inst["cnf_path"], args.timeout, args.solver_cpus,
+         solver_type, extra_args)
         for inst in instances
     ]
 
@@ -232,6 +252,7 @@ def main():
         f.write(f"# solver={meta['solver']}\n")
         f.write(f"# timeout={meta['timeout']}\n")
         f.write(f"# solver_cpus={meta['solver_cpus']}\n")
+        f.write(f"# solver_args={meta['solver_args']}\n")
         f.write(f"# hostname={meta['hostname']}\n")
         f.write(f"# timestamp={meta['timestamp']}\n")
         writer = csv.DictWriter(f, fieldnames=fieldnames)

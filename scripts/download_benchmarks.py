@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """Self-contained parallel downloader for SAT Competition benchmarks.
 
-Downloads from benchmark-database.de. Each year is stored in its own directory
-(benchmarks/sc2023/, benchmarks/sc2024/) with an independent instances.csv.
+Downloads from benchmark-database.de. Each year in benchmarks/sc2023/, benchmarks/sc2024/
+with instances.csv. Only .cnf is kept; .xz is deleted after decompression.
+
+Features:
+  - Auto-verify CNF integrity (last line ends with ' 0')
+  - Delete .xz after successful decompress (save ~50% disk)
+  - Generate track_main_{year}.uri for each year
 
 Examples:
-    python scripts/download_benchmarks.py                          # SC2023 + SC2024, 8 workers
-    python scripts/download_benchmarks.py --year 2023              # SC2023 only
-    python scripts/download_benchmarks.py --year 2024 -j 16       # SC2024, 16 workers
-    python scripts/download_benchmarks.py --year all --bg          # Background mode
-    python scripts/download_benchmarks.py --year 2023 --limit 50  # First 50 only
+    python scripts/download_benchmarks.py                    # SC2023 + SC2024
+    python scripts/download_benchmarks.py --year 2023 -j 16
+    python scripts/download_benchmarks.py --year all --bg
+    python scripts/download_benchmarks.py --verify           # Re-check existing, re-dl corrupt
+    python scripts/download_benchmarks.py --cleanup          # Remove .cache, download.log
 """
 
 import argparse
@@ -195,6 +200,25 @@ def fetch_track(year: str) -> list[dict]:
     return instances
 
 
+# ── Integrity verification ──────────────────────────────────────────────────
+
+def _verify_cnf_tail(path: Path) -> tuple[bool, str]:
+    """Verify last line of CNF ends with ' 0'. Return (ok, msg)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(max(0, path.stat().st_size - 256))
+            tail = f.read().decode("utf-8", errors="replace")
+        lines = [l.strip() for l in tail.rsplit("\n", 2) if l.strip()]
+        if not lines:
+            return False, "empty or no complete line"
+        last = lines[-1]
+        if last.endswith(" 0") or (last.endswith("0") and " " in last):
+            return True, ""
+        return False, f"last line does not end with ' 0': ...{last[-40:]}"
+    except Exception as e:
+        return False, str(e)[:80]
+
+
 # ── Download + decompress ───────────────────────────────────────────────────
 
 def _decompress(src: Path, dst: Path):
@@ -214,24 +238,61 @@ def _cnf_name(filename: str) -> str:
     return name
 
 
-def download_one(inst: dict, dest_dir: Path) -> tuple[dict, str | None, str, str | None]:
-    """Returns (inst, cnf_path, status, error).  status ∈ {skipped, downloaded, failed}."""
+def _verify_and_cleanup(compressed: Path, cnf_path: Path, delete_compressed: bool) -> tuple[bool, str]:
+    """Verify CNF, optionally delete compressed. Return (ok, msg)."""
+    ok, msg = _verify_cnf_tail(cnf_path)
+    if not ok:
+        cnf_path.unlink(missing_ok=True)
+        compressed.unlink(missing_ok=True)
+        return False, msg
+    if delete_compressed and compressed.exists():
+        compressed.unlink(missing_ok=True)
+    return True, ""
+
+
+def download_one(
+    inst: dict,
+    dest_dir: Path,
+    *,
+    verify_existing: bool = False,
+    delete_xz: bool = True,
+) -> tuple[dict, str | None, str, str | None]:
+    """Returns (inst, cnf_path, status, error).  status ∈ {skipped, downloaded, failed, re-downloaded}."""
     filename = inst["filename"]
     compressed = dest_dir / filename
     cnf_path = dest_dir / _cnf_name(filename)
 
     if cnf_path.exists():
-        return (inst, str(cnf_path), "skipped", None)
+        if verify_existing:
+            ok, msg = _verify_cnf_tail(cnf_path)
+            if not ok:
+                cnf_path.unlink(missing_ok=True)
+                compressed.unlink(missing_ok=True)
+                # Fall through to re-download
+            else:
+                if compressed.exists() and delete_xz:
+                    compressed.unlink(missing_ok=True)
+                return (inst, str(cnf_path), "skipped", None)
+        else:
+            if compressed.exists() and delete_xz:
+                compressed.unlink(missing_ok=True)
+            return (inst, str(cnf_path), "skipped", None)
 
     if compressed.exists():
         try:
             _decompress(compressed, cnf_path)
-            return (inst, str(cnf_path), "skipped", None)
-        except Exception:
+            ok, msg = _verify_and_cleanup(compressed, cnf_path, delete_xz)
+            if ok:
+                return (inst, str(cnf_path), "skipped", None)
+            # Verify failed, fall through to re-download
+            last_err = msg
+        except Exception as e:
             compressed.unlink(missing_ok=True)
+            last_err = str(e)
+    else:
+        last_err = ""
 
     url = FILE_URL + inst["hash"]
-    last_err = ""
     for attempt in range(MAX_RETRIES + 1):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -241,17 +302,68 @@ def download_one(inst: dict, dest_dir: Path) -> tuple[dict, str | None, str, str
 
             if compressed.suffix in (".xz", ".gz"):
                 _decompress(compressed, cnf_path)
+                ok, msg = _verify_and_cleanup(compressed, cnf_path, delete_xz)
             else:
-                cnf_path = compressed
+                if compressed != cnf_path:
+                    shutil.move(str(compressed), str(cnf_path))
+                ok, msg = _verify_cnf_tail(cnf_path)
 
-            return (inst, str(cnf_path), "downloaded", None)
+            if ok:
+                return (inst, str(cnf_path), "downloaded", None)
+            last_err = msg
+            cnf_path.unlink(missing_ok=True)
         except Exception as e:
             last_err = str(e)
-            if attempt < MAX_RETRIES:
-                time.sleep(2 ** attempt)
+            compressed.unlink(missing_ok=True)
+        if attempt < MAX_RETRIES:
+            time.sleep(2 ** attempt)
 
     compressed.unlink(missing_ok=True)
     return (inst, None, "failed", last_err)
+
+
+# ── Integrity check (check-only mode) ────────────────────────────────────────
+
+def _run_integrity_check():
+    """Verify all CNF files, print report."""
+    years = ["2023", "2024"]
+    stats = {"ok": 0, "missing": 0, "corrupt": 0}
+    issues = []
+
+    for year in years:
+        csv_path = BENCH_DIR / f"sc{year}" / "instances.csv"
+        if not csv_path.exists():
+            log.warning("SKIP: %s not found", csv_path)
+            continue
+        dest_dir = BENCH_DIR / f"sc{year}"
+        with open(csv_path) as f:
+            for row in csv.DictReader(f):
+                cnf_name = _cnf_name(row["filename"])
+                cnf_path = dest_dir / cnf_name
+                if not cnf_path.exists():
+                    stats["missing"] += 1
+                    issues.append((year, cnf_name, "MISSING"))
+                    continue
+                ok, msg = _verify_cnf_tail(cnf_path)
+                if ok:
+                    stats["ok"] += 1
+                else:
+                    stats["corrupt"] += 1
+                    issues.append((year, cnf_name, msg))
+
+    log.info("=" * 60)
+    log.info("  Integrity Report: OK=%d  Missing=%d  Corrupt=%d",
+             stats["ok"], stats["missing"], stats["corrupt"])
+    log.info("=" * 60)
+    if issues:
+        for year, name, msg in issues[:20]:
+            log.warning("  [%s] %s: %s", year, name, msg[:60] if msg != "MISSING" else msg)
+        if len(issues) > 20:
+            log.warning("  ... and %d more", len(issues) - 20)
+    r = subprocess.run(["du", "-sh", str(BENCH_DIR)], capture_output=True, text=True)
+    if r.returncode == 0:
+        log.info("  Disk: %s", r.stdout.strip())
+    sys.exit(1 if issues else 0)
 
 
 # ── Progress tracker ────────────────────────────────────────────────────────
@@ -295,7 +407,26 @@ def main():
                         help="Run in background, log to benchmarks/download.log")
     parser.add_argument("--force-refresh", action="store_true",
                         help="Ignore cached metadata, re-fetch from web")
+    parser.add_argument("--verify", action="store_true",
+                        help="Verify existing CNF files, re-download if corrupt")
+    parser.add_argument("--no-delete-xz", action="store_true",
+                        help="Keep .xz after decompress (default: delete to save space)")
+    parser.add_argument("--cleanup", action="store_true",
+                        help="Remove .cache and download.log at end")
+    parser.add_argument("--check-only", action="store_true",
+                        help="Only verify existing CNF integrity, no download")
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    # ── Check-only mode: verify integrity, print report, exit ──
+    if args.check_only:
+        _run_integrity_check()
+        return
 
     # ── Background mode: relaunch self as detached subprocess ──
     if args.bg:
@@ -309,12 +440,6 @@ def main():
         print(f"Log : {log_path}")
         print(f"Monitor : tail -f {log_path}")
         sys.exit(0)
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%H:%M:%S",
-    )
 
     if args.force_refresh:
         for f in CACHE_DIR.glob("*.json"):
@@ -333,14 +458,22 @@ def main():
         if args.limit:
             insts = insts[: args.limit]
         log.info("SC%s: %d instances → %s", year, len(insts), year_dir)
+        delete_xz = not args.no_delete_xz
 
         progress = _Progress(len(insts))
         results: list[dict] = []
         results_lock = threading.Lock()
         t0 = time.monotonic()
 
+        def _task(inst):
+            return download_one(
+                inst, year_dir,
+                verify_existing=args.verify,
+                delete_xz=delete_xz,
+            )
+
         with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            futures = {pool.submit(download_one, inst, year_dir): inst for inst in insts}
+            futures = {pool.submit(_task, inst): inst for inst in insts}
 
             for future in as_completed(futures):
                 inst, cnf_path, status, error = future.result()
@@ -377,6 +510,11 @@ def main():
             writer.writeheader()
             writer.writerows(results)
 
+        track_uri = BENCH_DIR / f"track_main_{year}.uri"
+        uris = [f"{FILE_URL}{r['hash']}" for r in results]
+        track_uri.write_text("\n".join(uris) + "\n")
+        log.info("  Track URI  : %s", track_uri)
+
         sat_n = sum(1 for r in results if r["expected"] == "sat")
         unsat_n = sum(1 for r in results if r["expected"] == "unsat")
 
@@ -388,6 +526,16 @@ def main():
         log.info("  Indexed    : %d  (SAT=%d  UNSAT=%d  unknown=%d)",
                  len(results), sat_n, unsat_n, len(results) - sat_n - unsat_n)
         log.info("  Output     : %s", instances_csv)
+
+    if args.cleanup:
+        for path in [CACHE_DIR, BENCH_DIR / "download.log"]:
+            if path.exists():
+                if path.is_dir():
+                    shutil.rmtree(path)
+                    log.info("Removed: %s", path)
+                else:
+                    path.unlink()
+                    log.info("Removed: %s", path)
 
 
 if __name__ == "__main__":
