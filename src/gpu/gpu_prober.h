@@ -37,6 +37,7 @@ private:
     void alloc_device_memory();
     void free_device_memory();
     void upload_clause_db();
+    void compute_launch_config();
 
     GPUProberConfig config_;
     GPUChannel& channel_;
@@ -60,9 +61,9 @@ private:
     std::atomic<bool> stop_requested_{false};
     std::atomic<uint64_t> total_steps_{0};
 
-    int grid_size_     = 64;
-    int block_size_    = 1;
-    int total_threads_ = 64;
+    int grid_size_     = 0;
+    int block_size_    = 0;
+    int total_threads_ = 0;
 };
 
 }  // namespace sat_parallel

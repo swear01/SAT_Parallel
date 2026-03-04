@@ -42,3 +42,4 @@ gpu:
   hotzone_top_k: 200
   master_push_interval_s: 5.0
   learnt_clause_lbd_filter: 3
+  num_walks: 0   # 0=auto from device (SM count, memory)

@@ -1,7 +1,10 @@
 # 實作細節
 
-> 資料結構定義、公式、通訊協定 payload、GC 規則。
+> 資料結構定義、公式、GC 規則。
 > 架構決策見 `RESEARCH_PLAN.md`，可調參數見 `config/default_params.yaml`。
+> DSRG 使用方式見 `docs/DSRG_USAGE_SUMMARY.md`。
+
+> **架構說明：** 現行採用 Painless DSRGSharing（shr-strat=4），透過 CaDiCaL Tracer 取得 antecedents 建立 co-conflict 邊。GPU Prober 已整合（`-shr-gpu`），hotzone 回報納入 boost_node 流程。
 
 ---
 
@@ -46,11 +49,12 @@ edge:
 W_edge(c_i, c_j) = β · W_edge(c_i, c_j) + (1 - β) · Δ_conflict(c_i, c_j)
 ```
 
-**節點權重衰減：**
+**節點權重衰減（Painless DSRGSharing）：**
 ```
 W_node(c)^{t+1} = γ · W_node(c)^{t} + Δ_W
 
-Δ_W: 參與衝突 → +1, GPU hotzone → +GPU_BOOST
+Δ_W: GPU hotzone 回報 → boost_node(clause_id, gpu_hotzone_boost × frequency)
+（已實作，`-shr-gpu` 啟用時 drain reports 並 boost）
 ```
 
 **Clause → Variable 聚合（Weighted Sum）：**
@@ -61,11 +65,6 @@ Score(v) = Σ α · Centrality(c) · W_node(c)   for c ∈ C_v
 **與 VSIDS 混合：**
 ```
 Final_Score(v) = (1 - λ) · VSIDS(v) + λ · GraphScore(v)
-```
-
-**Worker 權重融合：**
-```
-W_local(v) = α_local · W_local(v) + (1 - α_local) · W_global(v)
 ```
 
 ---
@@ -84,60 +83,37 @@ Power Iteration, damping=d, ε, max_iter 見 config
 
 ---
 
-## 4. 通訊協定 Payload
-
-### Delta Patch（Worker → Master）
+## 4. GPU Hotzone → boost_node（已實作）
 
 ```yaml
-trigger:  # 任一條件
-  - conflict_count_since_last >= delta_patch_conflict_interval
-  - learnt_clause_with_lbd <= delta_patch_lbd_trigger
-payload:
-  high_quality_clauses:  # LBD ≤ lbd_entry_threshold
-    - { clause_id, literals, lbd }
-  conflict_pairs:
-    - [clause_a, clause_b, delta_count]
-  hot_variables:
-    - [var_id, frequency]
-transport: lock_free_queue (MPSC)
-budget: "< 4KB per patch"
+來源: GPUProber 回報 (WalkSAT unsat 統計)
+payload: GPUReport.hotzone = [(clause_id, frequency), ...]  # raw frequency
+邏輯: DSRGSharing 在 runCentralityAndPhaseHints 中 drain reports
+      主程式內由 frequency + DSRG 節點屬性（length、lbd）計算 weight
+      再呼叫 dsrg_.boost_node(clause_id, weight)
+時序: 先 boost，再 decay_all_weights，再接 centrality 計算
 ```
 
-### Broadcast（Master → Workers）
+詳見 `docs/GPU_PROBER_INTEGRATION_PLAN.md`。
+
+---
+
+## 5. Co-conflict 邊（Painless 路徑）
+
+在 `DSRGSharing::drainPendingClauses` 中，依據 CaDiCaL Tracer 提供的 antecedents 建立邊：
 
 ```yaml
-frequency: broadcast_interval_ms
-payload:
-  top_k_variable_scores:
-    - [var_id, global_score]
-  top_k_clause_weights:
-    - [clause_id, global_weight]
-  shared_learnt_clauses:  # LBD ≤ 2
-transport: shared_memory
-```
-
-### GPU ↔ Master
-
-```yaml
-gpu_to_master:
-  transport: CUDA_pinned_memory + lock_free_queue
-  payload:
-    hotzone_clause_ids: list[(clause_id, frequency)]
-    best_assignment: dict[var_id, bool]
-    unsat_count: int
-  master_action:
-    - hotzone nodes += GPU_BOOST weight
-    - phase hints → broadcast to Workers
-
-master_to_gpu:
-  transport: CUDA_pinned_memory
-  payload: new_learnt_clauses (LBD ≤ learnt_clause_lbd_filter)
-  frequency: master_push_interval_s
+來源: AntecedentProvider::getLastDerivation() → { ca_id, antecedents }
+邏輯:
+  - 新 clause 與每個 antecedent 之間: record_co_conflict
+  - antecedent 兩兩之間: record_co_conflict
+  - caIdToDsrgId_ 維持 ca_id → dsrg_id 映射，供後續 clause 參考
+  - GC 時清理已淘汰節點對應的映射
 ```
 
 ---
 
-## 5. 圖清理規則
+## 6. 圖清理規則
 
 ### 節點淘汰
 
@@ -149,7 +125,7 @@ eviction_conditions:  # 全部滿足時移除
   - weight < eviction_weight_threshold
   - lbd > eviction_lbd_threshold
   - age > min_age_before_eviction
-frequency: 每 gc_interval 次 Master 更新
+frequency: DSRGSharing 定期 runCentralityAndPhaseHints 內 evict_stale_nodes
 ```
 
 ### 邊稀疏化
@@ -175,7 +151,7 @@ Variable Elimination（變數 v 被消除）：
 
 ---
 
-## 6. C++ 資料結構
+## 7. C++ 資料結構
 
 ```cpp
 struct GraphNode {
@@ -195,42 +171,7 @@ struct GraphEdge {
     int      co_conflict_count;
 };
 
-struct DeltaPatch {
-    uint32_t worker_id;
-    uint64_t conflict_count;
-
-    struct LearnedClause {
-        uint32_t clause_id;
-        std::vector<int> literals;
-        int lbd;
-    };
-    std::vector<LearnedClause> new_clauses;
-
-    struct ConflictPair {
-        uint32_t clause_a, clause_b;
-        int delta_count;
-    };
-    std::vector<ConflictPair> conflict_pairs;
-
-    struct HotVariable {
-        uint32_t var_id;
-        int frequency;
-    };
-    std::vector<HotVariable> hot_variables;
-};
-
-struct GlobalBroadcast {
-    uint64_t timestamp;
-
-    struct VarScore { uint32_t var_id; float global_score; };
-    std::vector<VarScore> top_k_var_scores;
-
-    struct ClauseWeight { uint32_t clause_id; float global_weight; };
-    std::vector<ClauseWeight> top_k_clause_weights;
-
-    std::vector<std::vector<int>> shared_clauses;
-};
-```
+> DeltaPatch、GlobalBroadcast 等結構已隨 Master/Worker 架構移除。現行 DSRGSharing 使用 Painless 內建 clause sharing。
 
 ### Clause-Variable 雙向索引
 
@@ -246,12 +187,4 @@ var_clauses_: unordered_map<uint32_t, vector<uint32_t>>  // var_id -> clause_ids
 - `remove_node()` 同步清理兩側索引
 - `handle_variable_elimination()` 從 `var_clauses_` 找到受影響的 clauses
 
-### 圖切割參數
-
-```yaml
-partitioning:
-  algorithm: louvain             # louvain | label_propagation
-  target_communities: N_workers
-  max_cut_variables: 15
-  enable_work_stealing: true
-```
+> 圖切割參數（Louvain、work stealing）已隨 Master 架構移除。

@@ -11,7 +11,7 @@ struct GPUProberConfig {
     int   hotzone_top_k           = 200;
     float master_push_interval_s  = 5.0f;
     int   learnt_clause_lbd_filter = 3;
-    int   num_threads              = 256;   // CUDA threads per block
+    int   num_walks                = 0;     // Parallel WalkSAT runs (0=auto from device)
     int   max_flips_per_run        = 100000;
     float noise_probability        = 0.57f; // WalkSAT noise parameter
 };
@@ -28,6 +28,8 @@ inline GPUProberConfig load_gpu_prober_config(const std::string& yaml_path) {
             cfg.master_push_interval_s = gpu["master_push_interval_s"].as<float>();
         if (gpu["learnt_clause_lbd_filter"])
             cfg.learnt_clause_lbd_filter = gpu["learnt_clause_lbd_filter"].as<int>();
+        if (gpu["num_walks"])
+            cfg.num_walks = gpu["num_walks"].as<int>();
     }
     return cfg;
 }

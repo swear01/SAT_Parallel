@@ -4,20 +4,35 @@
 
 ---
 
-## 1. 系統架構
+## 1. 系統架構（現行）
 
-三種角色透過非同步通訊協作：
+**Painless 框架 + DSRGSharing（shr-strat=4）**
 
-- **Master (1 thread)** — 維護 Global DSRG、執行圖演算法（中心性 / 社群偵測）、生成 Cubes 分配任務、聚合回饋。不做 CDCL 搜尋。
-- **Worker (N threads)** — 各自執行深層 CDCL、維護 Local Graph Weights 副本、定期回傳 Delta Patch、融合 Master 廣播的全域權重。不直接修改 Global DSRG。
-- **GPU Prober** — 持續平行 WalkSAT，回傳 Hotzone Clause IDs 與 Phase Hints。不證明 UNSAT。
+- **Painless** 負責平行 CDCL、clause sharing、負載平衡
+- **DSRGSharing** 作為 sharing strategy：接收各 Producer 的 learnt clauses，維護 DSRG 圖，定期計算中心性與 phase hints
+- **DSRG 圖** 以 clause 為節點、co-conflict 為邊；透過 CaDiCaL Tracer 取得 antecedents 建立邊
+- **中心性與 phase** 經由 `compute_centrality` → `aggregate_to_variables` → `select_top_k` → `setPhase` 引導 CDCL 決策
 
 ### 資料流
 
-1. **GPU → Master：** Hotzone（最常卡住的 Clause IDs）+ Phase Hints（局部最佳賦值）
-2. **Master → GPU：** 高品質 Learnt Clauses（LBD ≤ 3）
-3. **Worker → Master：** Delta Patch（高品質 Clauses + 衝突對 + 熱變數）
-4. **Master → Workers：** Top-K 全域權重 + 共享 Clauses + Cubes
+1. **Producer (Cadical)** learn clause → `exportClause` → `DSRGSharing::importClause`
+2. **AntecedentProvider**（透過 CaDiCaL Tracer）提供 antecedents → `record_co_conflict` 建立邊
+3. **DSRGSharing** 定期 `drainPendingClauses`、`runCentralityAndPhaseHints`、GC
+4. **Phase hints** 回傳給各 CDCL solver 引導變數賦值順序
+
+### GPU Prober（已整合）
+
+GPU WalkSAT probing 已整合至 DSRGSharing 權重更新流程（`-shr-strat=4 -shr-gpu`）：
+
+- **GPUProber** 在獨立 thread 執行 WalkSAT，統計各 clause 的 unsat 次數
+- 回報 **hotzone**（top-K 高 unsat 次數的 clause_id）透過 GPUChannel 送至 DSRGSharing
+- DSRGSharing 在 `runCentralityAndPhaseHints` 中 drain reports，呼叫 `boost_node(clause_id, gpu_hotzone_boost × frequency)`
+- **動態 launch 配置：** 依 GPU 裝置屬性（SM 數量、可用記憶體）自動計算 grid/block，不再寫死 64 threads；可經 `config.num_walks` 或 YAML `gpu.num_walks` 設定最少 walks
+- 詳見 [docs/GPU_PROBER_INTEGRATION_PLAN.md](docs/GPU_PROBER_INTEGRATION_PLAN.md)
+
+### 已棄用架構
+
+原先的 Master / Worker 架構（Delta Patch、Broadcast、社群偵測、圖切割）已移除，詳見 [TODO.md](TODO.md) 已棄用架構一節。
 
 ---
 
@@ -27,9 +42,9 @@
 
 ### 核心設計決策
 
-- **節點 = Clause。** 每個節點追蹤 weight、LBD、所屬社群。Original clauses 永遠保留；Learnt clauses 須通過 LBD 門檻才能進圖。
-- **邊 = 衝突共現。** 兩個 Clause 共同參與衝突解析超過閾值次數後才建立邊。邊權重反映語義關聯強度，非靜態共享變數。
-- **權重動態衰減。** 節點與邊的權重隨時間指數衰減（類似 VSIDS），由新衝突事件與 GPU hotzone 回饋驅動增量。
+- **節點 = Clause。** 每個節點追蹤 weight、LBD。Original clauses 永遠保留；Learnt clauses 須通過 LBD 門檻才能進圖。
+- **邊 = 衝突共現（co-conflict）。** 兩個 Clause 共同參與同一 conflict 的 resolution 則建立邊（透過 CaDiCaL antecedents）。邊權重反映語義關聯強度。
+- **權重動態衰減。** 節點與邊的權重隨時間指數衰減（類似 VSIDS）。**GPU hotzone boost** 作為增量輸入，`boost_node(clause_id, Δ)` 對應 WalkSAT 回報的 high-unsat clauses。
 - **Clause-Variable 雙向索引。** DSRG 在新增節點時記錄 clause 包含的 variable IDs，維護 clause→vars 與 var→clauses 雙向映射，供 Phase 2 聚合計算使用。
 
 ### 實作決策
@@ -45,7 +60,7 @@
 
 ### 3.1 中心性 → 標定核心 Clauses
 
-Master 定期在 DSRG 上執行中心性計算。先用 **加權 Degree Centrality**（最輕量），驗證有效後可嘗試 **近似 PageRank**。
+DSRGSharing 定期在 DSRG 上執行中心性計算。先用 **加權 Degree Centrality**（最輕量），驗證有效後可嘗試 **近似 PageRank**。
 
 ### 3.2 Clause → Variable 聚合
 
@@ -63,30 +78,16 @@ Final_Score(v) = (1 - λ) · VSIDS(v) + λ · GraphScore(v)
 
 ## 4. 通訊機制
 
-### 設計原則
-
-- **極簡通訊：** Worker 不在每次 conflict 都回報，僅在滿足觸發條件時打包一個小型 Delta Patch（< 4KB）。
-- **非同步無鎖：** 所有通訊走 lock-free queue（MPSC），Worker 與 GPU 永遠不被 Master 阻塞。
-- **局部副本 + 定期同步：** 每個 Worker 維護自己的權重副本，Master 定期廣播全域 Top-K 權重，Worker 以指數移動平均融合。
-
-### Delta Patch 內容（Worker → Master）
-
-高品質 Learnt Clauses、頻繁共衝突的 Clause 對、頻繁衝突的變數。
-
-### Broadcast 內容（Master → Workers）
-
-Top-K 全域變數分數、Top-K Clause 權重、跨 Worker 共享的極品 Clauses。
+- **Clause sharing** 由 Painless 的 sharing pipeline 處理，DSRGSharing 在 `importClause` 接收 clauses
+- **Co-conflict 邊** 透過 CaDiCaL Tracer 取得的 antecedents 建立，不依賴外部 Delta Patch
+- **Phase hints** 經 DSRGSharing 的 `runCentralityAndPhaseHints` 計算後傳回各 solver
+- **GPU hotzone** 經 GPUChannel（MPSC queue）非同步回傳，DSRGSharing drain 後呼叫 `boost_node`
 
 ---
 
-## 5. 圖切割（Graph-based Partitioning）
+## 5. 圖切割（已棄用）
 
-利用 DSRG 的社群結構低成本指導多核心任務切割，取代傳統 Cube-and-Conquer 中昂貴的 Lookahead。
-
-1. Master 在 DSRG 上執行 **社群偵測**（Louvain / Label Propagation）
-2. 跨社群邊對應的 shared variables = **Cut Variables**
-3. 實例化 Cut Variables → 生成 **Cubes** → 分配給 Workers
-4. Worker 完成後 → **work stealing**（Master 再切割最大未解 Cube）
+原先設計的圖切割（Louvain 社群偵測 → Cut Variables → Cubes → work stealing）已隨 Master/Worker 架構移除。現行架構僅用 DSRG 做中心性計算與 phase 引導，不做任務切割。
 
 ---
 
@@ -102,9 +103,10 @@ Top-K 全域變數分數、Top-K Clause 權重、跨 Worker 共享的極品 Clau
 
 ## 7. 實作平台
 
-**Painless 框架 + CaDiCaL 引擎**
-- Painless 已內建 Master-Worker 通訊抽象與 clause sharing 機制，且已介接 CaDiCaL 作為底層 solver
-- 改裝：在 Painless 的 sharing strategy 層加入 DSRG 模組、將一個 Worker slot 改為 Master 角色、新增 GPU Prober 模組
+**Painless 框架 + CaDiCaL 引擎 + DSRGSharing**
+- Painless 內建 clause sharing 與 CDCL 平行化
+- DSRGSharing 作為 sharing strategy（shr-strat=4），使用 `src/core/` 的 DSRG、centrality、aggregation
+- CaDiCaL 透過 DSRGCadicalTracer 提供 antecedents，供 `record_co_conflict` 建立 co-conflict 邊
 
 ---
 
@@ -113,20 +115,21 @@ Top-K 全域變數分數、Top-K Clause 權重、跨 Worker 共享的極品 Clau
 ```
 SAT_Parallel/
 ├── RESEARCH_PLAN.md              # 架構決策（本文件）
+├── TODO.md                       # 階段任務與進度
 ├── docs/
-│   └── IMPL_DETAILS.md           # 資料結構、公式、參數細節
+│   ├── IMPL_DETAILS.md           # 資料結構、公式、參數細節
+│   ├── DSRG_USAGE_SUMMARY.md     # DSRG 使用方式與權重更新整理
+│   └── GPU_PROBER_INTEGRATION_PLAN.md  # GPU 整合設計
 ├── config/
-│   └── default_params.yaml       # 所有可調參數
-├── references.bib
+│   └── default_params.yaml       # DSRG / centrality / gpu 可調參數
 ├── src/
-│   ├── core/                     # DSRG、中心性、聚合、GC
-│   ├── master/                   # Master 邏輯、社群偵測、廣播
-│   ├── worker/                   # Worker 邏輯、局部權重、Delta Patch
-│   ├── gpu/                      # CUDA WalkSAT、GPU Prober
-│   ├── comm/                     # lock-free queue、shared memory
-│   └── solver/                   # Painless 框架 + CaDiCaL
-├── scripts/                      # benchmark / ablation 腳本
-└── benchmarks/
+│   ├── core/                     # DSRG、中心性、聚合、GC（Painless 連結）
+│   ├── comm/                     # mpsc_queue、gpu_channel（GPU 用）
+│   └── gpu/                      # GPUProber、WalkSAT kernel（選填）
+├── deps/
+│   └── painless/                 # Painless + DSRGSharing + DSRGCadicalTracer
+├── scripts/                      # benchmark / 分析腳本
+└── benchmarks/                   # SAT Competition 測試集
 ```
 
 ---

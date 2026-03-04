@@ -48,8 +48,49 @@ void GPUProber::load_clauses(const std::vector<std::vector<int>>& clauses,
     upload_clause_db();
 }
 
+void GPUProber::compute_launch_config() {
+    block_size_   = 32;  // One warp per block for good occupancy
+    grid_size_    = 64;
+    total_threads_ = 64;
+
+    cudaDeviceProp prop;
+    if (cudaGetDeviceProperties(&prop, 0) != cudaSuccess)
+        return;
+
+    const int min_walks = config_.num_walks > 0 ? config_.num_walks : 256;
+    const int desired = std::max(min_walks, prop.multiProcessorCount * block_size_);
+    grid_size_ = std::max(1, (desired + block_size_ - 1) / block_size_);
+
+    // Cap by device limits
+    if (grid_size_ > prop.maxGridSize[0])
+        grid_size_ = prop.maxGridSize[0];
+
+    size_t free_mem = 0;
+    if (cudaMemGetInfo(&free_mem, nullptr) == cudaSuccess && num_vars_ > 0) {
+        const size_t bytes_per_thread =
+            static_cast<size_t>(num_vars_) * sizeof(bool) * 2;  // assignment + best
+        const size_t max_by_mem = (free_mem / 4) / bytes_per_thread;  // use at most 25% free
+        const int max_threads = static_cast<int>(std::min(max_by_mem, static_cast<size_t>(16384)));
+        total_threads_ = grid_size_ * block_size_;
+        if (total_threads_ > max_threads) {
+            grid_size_ = std::max(1, max_threads / block_size_);
+        }
+    }
+    total_threads_ = grid_size_ * block_size_;
+
+    static bool logged_once = false;
+    if (!logged_once) {
+        std::fprintf(stderr, "c [GPU Prober] launch config: %d threads (%d blocks x %d)\n",
+                     total_threads_, grid_size_, block_size_);
+        logged_once = true;
+    }
+}
+
 void GPUProber::alloc_device_memory() {
     if (num_clauses_ == 0 || num_vars_ == 0) return;
+
+    compute_launch_config();
+
     int total_lits = static_cast<int>(h_literals_.size());
 
     CUDA_CHECK(cudaMalloc(&d_clause_offsets_,
@@ -211,17 +252,28 @@ void GPUProber::check_new_clauses() {
     auto push = channel_.consume_push();
     if (!push || push->clauses.empty()) return;
 
-    // Append new clauses to the host DB.
+    if (num_clauses_ == 0) {
+        // Full load (e.g. first push from DSRGSharing).
+        h_clause_ids_.clear();
+        h_literals_.clear();
+        h_clause_offsets_.clear();
+        h_clause_offsets_.push_back(0);
+        num_vars_ = push->num_vars;
+        if (num_vars_ <= 0) {
+            for (const auto& cl : push->clauses)
+                for (int lit : cl.literals)
+                    num_vars_ = std::max(num_vars_, std::abs(lit));
+        }
+    }
+
     for (const auto& cl : push->clauses) {
         h_clause_ids_.push_back(cl.clause_id);
-        for (int lit : cl.literals) {
+        for (int lit : cl.literals)
             h_literals_.push_back(lit);
-        }
         h_clause_offsets_.push_back(static_cast<int>(h_literals_.size()));
         num_clauses_++;
     }
 
-    // Reallocate and re-upload.
     free_device_memory();
     alloc_device_memory();
     upload_clause_db();
