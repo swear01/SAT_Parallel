@@ -93,6 +93,24 @@ void DSRG::record_co_conflict(uint32_t clause_a, uint32_t clause_b) {
     }
 }
 
+void DSRG::record_flip_induced_edge(uint32_t clause_a, uint32_t clause_b, float delta) {
+    if (clause_a == clause_b) return;
+    if (!has_node(clause_a) || !has_node(clause_b)) return;
+
+    uint64_t key = edge_key(clause_a, clause_b);
+    auto eit = edges_.find(key);
+    if (eit != edges_.end()) {
+        float beta = config_.edge_weight_momentum;
+        eit->second.weight = beta * eit->second.weight + (1.0f - beta) * delta;
+        return;
+    }
+    if (create_edge(clause_a, clause_b, 0)) {
+        auto it = edges_.find(key);
+        if (it != edges_.end())
+            it->second.weight = delta;
+    }
+}
+
 bool DSRG::remove_edge(uint32_t a, uint32_t b) {
     uint64_t key = edge_key(a, b);
     auto it = edges_.find(key);

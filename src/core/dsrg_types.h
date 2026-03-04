@@ -30,6 +30,7 @@ struct DSRGConfig {
     float node_weight_decay       = 0.95f;
     int   lbd_entry_threshold     = 3;
     float gpu_hotzone_boost       = 2.0f;
+    float gpu_edge_boost          = 1.0f;
 
     int   gc_interval                = 10000;
     float eviction_weight_threshold  = 0.01f;
@@ -48,6 +49,7 @@ inline DSRGConfig load_dsrg_config(const std::string& yaml_path) {
         if (g["node_weight_decay"])       cfg.node_weight_decay       = g["node_weight_decay"].as<float>();
         if (g["lbd_entry_threshold"])     cfg.lbd_entry_threshold     = g["lbd_entry_threshold"].as<int>();
         if (g["gpu_hotzone_boost"])       cfg.gpu_hotzone_boost       = g["gpu_hotzone_boost"].as<float>();
+        if (g["gpu_edge_boost"])          cfg.gpu_edge_boost          = g["gpu_edge_boost"].as<float>();
     }
 
     if (auto gc = root["gc"]) {

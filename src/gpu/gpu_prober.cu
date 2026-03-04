@@ -1,9 +1,11 @@
 #include "gpu/gpu_prober.h"
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cuda_runtime.h>
 #include <numeric>
+#include <unordered_set>
 #include <vector>
 
 #define CUDA_CHECK(call) do { \
@@ -107,6 +109,18 @@ void GPUProber::alloc_device_memory() {
                           static_cast<size_t>(total_threads_ * num_vars_) * sizeof(bool)));
     CUDA_CHECK(cudaMalloc(&d_clause_unsat_freq_,
                           static_cast<size_t>(num_clauses_) * sizeof(int)));
+
+    int edge_cap = config_.edge_hash_capacity > 0 ? config_.edge_hash_capacity : 0;
+    if (edge_cap > 0) {
+        CUDA_CHECK(cudaMalloc(&d_edge_keys_,
+                              static_cast<size_t>(edge_cap) * sizeof(uint64_t)));
+        CUDA_CHECK(cudaMalloc(&d_edge_counts_,
+                              static_cast<size_t>(edge_cap) * sizeof(int)));
+        CUDA_CHECK(cudaMemset(d_edge_keys_, 0,
+                              static_cast<size_t>(edge_cap) * sizeof(uint64_t)));
+        CUDA_CHECK(cudaMemset(d_edge_counts_, 0,
+                              static_cast<size_t>(edge_cap) * sizeof(int)));
+    }
 }
 
 void GPUProber::free_device_memory() {
@@ -117,6 +131,8 @@ void GPUProber::free_device_memory() {
     if (d_best_unsat_)        { cudaFree(d_best_unsat_);        d_best_unsat_ = nullptr; }
     if (d_best_assignments_)  { cudaFree(d_best_assignments_);  d_best_assignments_ = nullptr; }
     if (d_clause_unsat_freq_) { cudaFree(d_clause_unsat_freq_); d_clause_unsat_freq_ = nullptr; }
+    if (d_edge_keys_)        { cudaFree(d_edge_keys_);        d_edge_keys_ = nullptr; }
+    if (d_edge_counts_)      { cudaFree(d_edge_counts_);      d_edge_counts_ = nullptr; }
 }
 
 void GPUProber::upload_clause_db() {
@@ -167,8 +183,11 @@ void GPUProber::run_one_batch() {
     params.best_unsat_counts = d_best_unsat_;
     params.best_assignments  = d_best_assignments_;
     params.clause_unsat_freq = d_clause_unsat_freq_;
-    params.max_flips         = config_.max_flips_per_run;
-    params.noise_prob        = config_.noise_probability;
+    params.edge_keys        = d_edge_keys_;
+    params.edge_counts      = d_edge_counts_;
+    params.edge_capacity    = (d_edge_keys_ && d_edge_counts_) ? config_.edge_hash_capacity : 0;
+    params.max_flips       = config_.max_flips_per_run;
+    params.noise_prob      = config_.noise_probability;
 
     auto now = std::chrono::steady_clock::now().time_since_epoch();
     params.seed = static_cast<unsigned long long>(
@@ -246,6 +265,57 @@ void GPUProber::collect_and_report() {
     }
 
     channel_.send_report(std::move(report));
+
+    // Flush flip-induced edges: extract top-K pairs restricted to hotzone.
+    if (d_edge_keys_ && d_edge_counts_) {
+        int edge_cap = config_.edge_hash_capacity;
+        std::vector<uint64_t> h_keys(static_cast<size_t>(edge_cap));
+        std::vector<int> h_counts(static_cast<size_t>(edge_cap));
+        CUDA_CHECK(cudaMemcpy(h_keys.data(), d_edge_keys_,
+                              static_cast<size_t>(edge_cap) * sizeof(uint64_t),
+                              cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(h_counts.data(), d_edge_counts_,
+                              static_cast<size_t>(edge_cap) * sizeof(int),
+                              cudaMemcpyDeviceToHost));
+
+        std::unordered_set<int> hotzone_set;
+        for (int i = 0; i < top_k; ++i)
+            hotzone_set.insert(indexed_freq[static_cast<size_t>(i)].first);
+
+        std::vector<std::pair<std::pair<uint32_t, uint32_t>, int>> edge_list;
+        for (int s = 0; s < edge_cap; ++s) {
+            uint64_t key = h_keys[static_cast<size_t>(s)];
+            int cnt = h_counts[static_cast<size_t>(s)];
+            if (key == 0 || cnt <= 0) continue;
+            uint32_t a = static_cast<uint32_t>(key >> 32);
+            uint32_t b = static_cast<uint32_t>(key & 0xFFFFFFFFu);
+            if (a < static_cast<uint32_t>(num_clauses_) && b < static_cast<uint32_t>(num_clauses_) &&
+                hotzone_set.count(static_cast<int>(a)) && hotzone_set.count(static_cast<int>(b))) {
+                uint32_t cid_a = h_clause_ids_[static_cast<size_t>(a)];
+                uint32_t cid_b = h_clause_ids_[static_cast<size_t>(b)];
+                edge_list.push_back({{cid_a, cid_b}, cnt});
+            }
+        }
+        std::sort(edge_list.begin(), edge_list.end(),
+                  [](const auto& x, const auto& y) { return x.second > y.second; });
+
+        int edge_top = std::min(config_.edge_hotzone_top_k,
+                               static_cast<int>(edge_list.size()));
+        EdgeHotzoneReport edge_report;
+        for (int i = 0; i < edge_top; ++i) {
+            edge_report.top_edges.push_back(
+                {edge_list[static_cast<size_t>(i)].first.first,
+                 edge_list[static_cast<size_t>(i)].first.second,
+                 edge_list[static_cast<size_t>(i)].second});
+        }
+        if (!edge_report.top_edges.empty())
+            channel_.send_edge_report(std::move(edge_report));
+
+        CUDA_CHECK(cudaMemset(d_edge_keys_, 0,
+                              static_cast<size_t>(edge_cap) * sizeof(uint64_t)));
+        CUDA_CHECK(cudaMemset(d_edge_counts_, 0,
+                              static_cast<size_t>(edge_cap) * sizeof(int)));
+    }
 }
 
 void GPUProber::check_new_clauses() {

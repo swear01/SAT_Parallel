@@ -55,6 +55,8 @@ private:
     int*       d_best_unsat_        = nullptr;
     bool*      d_best_assignments_  = nullptr;
     int*       d_clause_unsat_freq_ = nullptr;
+    uint64_t*  d_edge_keys_        = nullptr;
+    int*       d_edge_counts_       = nullptr;
 
     std::thread thread_;
     std::atomic<bool> running_{false};

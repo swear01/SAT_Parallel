@@ -14,6 +14,8 @@ struct GPUProberConfig {
     int   num_walks                = 0;     // Parallel WalkSAT runs (0=auto from device)
     int   max_flips_per_run        = 100000;
     float noise_probability        = 0.57f; // WalkSAT noise parameter
+    int   edge_hash_capacity       = 32768;  // GPU hash table slots for flip-induced edges
+    int   edge_hotzone_top_k       = 200;    // Top-K edge pairs to report (restricted to hotzone)
 };
 
 inline GPUProberConfig load_gpu_prober_config(const std::string& yaml_path) {
@@ -30,6 +32,10 @@ inline GPUProberConfig load_gpu_prober_config(const std::string& yaml_path) {
             cfg.learnt_clause_lbd_filter = gpu["learnt_clause_lbd_filter"].as<int>();
         if (gpu["num_walks"])
             cfg.num_walks = gpu["num_walks"].as<int>();
+        if (gpu["max_flips_per_run"])
+            cfg.max_flips_per_run = gpu["max_flips_per_run"].as<int>();
+        if (gpu["edge_hotzone_top_k"])
+            cfg.edge_hotzone_top_k = gpu["edge_hotzone_top_k"].as<int>();
     }
     return cfg;
 }

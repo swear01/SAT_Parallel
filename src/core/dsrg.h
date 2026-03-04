@@ -36,6 +36,10 @@ public:
     // creates the edge once edge_creation_threshold is reached.
     void record_co_conflict(uint32_t clause_a, uint32_t clause_b);
 
+    // GPU flip-induced edge: delta from WalkSAT (C_a flip caused C_b SAT->UNSAT).
+    // Uses same EMA formula. Creates edge immediately if not exists.
+    void record_flip_induced_edge(uint32_t clause_a, uint32_t clause_b, float delta);
+
     bool remove_edge(uint32_t a, uint32_t b);
     const GraphEdge* get_edge(uint32_t a, uint32_t b) const;
     bool has_edge(uint32_t a, uint32_t b) const;

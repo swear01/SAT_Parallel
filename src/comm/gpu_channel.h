@@ -25,6 +25,15 @@ struct GPUReport {
     int unsat_count = 0;
 };
 
+struct EdgeHotzoneReport {
+    struct EdgeEntry {
+        uint32_t clause_a;
+        uint32_t clause_b;
+        int count;
+    };
+    std::vector<EdgeEntry> top_edges;
+};
+
 struct GPUClausePush {
     struct Clause {
         uint32_t clause_id;
@@ -56,6 +65,15 @@ public:
         return reports_.drain(std::forward<Fn>(fn));
     }
 
+    void send_edge_report(EdgeHotzoneReport report) {
+        edge_reports_.push(std::move(report));
+    }
+
+    template <typename Fn>
+    size_t drain_edge_reports(Fn&& fn) {
+        return edge_reports_.drain(std::forward<Fn>(fn));
+    }
+
     // --- Master -> GPU (single-slot latest-value, mutex for GCC 11) ---
 
     void push_clauses(GPUClausePush push) {
@@ -71,6 +89,7 @@ public:
 
 private:
     MPSCQueue<GPUReport> reports_;
+    MPSCQueue<EdgeHotzoneReport> edge_reports_;
     std::mutex push_mu_;
     std::shared_ptr<const GPUClausePush> pending_push_;
 };

@@ -105,7 +105,39 @@ __global__ void walksat_kernel(WalkSATParams p) {
             }
         }
 
-        my_assign[chosen_var - 1] = !my_assign[chosen_var - 1];
+        // Flip-induced edge: record (source_clause, target) where flip causes target SAT->UNSAT.
+        bool old_val = my_assign[chosen_var - 1];
+        my_assign[chosen_var - 1] = !old_val;
+
+        if (p.edge_keys && p.edge_counts && p.edge_capacity > 0) {
+            int src = random_unsat_idx;
+            for (int c = 0; c < p.num_clauses; ++c) {
+                if (c == src) continue;
+                // Check: was SAT before flip, UNSAT after?
+                my_assign[chosen_var - 1] = old_val;
+                int before = eval_clause(p.clause_offsets, p.literals, c, my_assign);
+                my_assign[chosen_var - 1] = !old_val;
+                int after = eval_clause(p.clause_offsets, p.literals, c, my_assign);
+                if (before == 1 && after == 0) {
+                    uint32_t a = (src < c) ? src : c;
+                    uint32_t b = (src < c) ? c : src;
+                    uint64_t key = (static_cast<uint64_t>(a) << 32) | b;
+                    int cap = p.edge_capacity;
+                    int slot = static_cast<int>(key % static_cast<uint64_t>(cap));
+                    for (int i = 0; i < cap; ++i) {
+                        int s = (slot + i) % cap;
+                        uint64_t old_key = atomicCAS(
+                            reinterpret_cast<unsigned long long*>(&p.edge_keys[s]),
+                            static_cast<unsigned long long>(0),
+                            static_cast<unsigned long long>(key));
+                        if (old_key == 0 || old_key == key) {
+                            atomicAdd(&p.edge_counts[s], 1);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Record final state.

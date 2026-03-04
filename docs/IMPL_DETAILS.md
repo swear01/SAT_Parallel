@@ -55,6 +55,12 @@ W_node(c)^{t+1} = γ · W_node(c)^{t} + Δ_W
 
 Δ_W: GPU hotzone 回報 → boost_node(clause_id, gpu_hotzone_boost × frequency)
 （已實作，`-shr-gpu` 啟用時 drain reports 並 boost）
+
+### Painless + DSRG+GPU 執行注意
+
+- 直接執行：`./deps/painless/painless <cnf> -shr-strat=4 -shr-gpu -c=<n> -t=<timeout>`
+- **建議 `-solver=kc`**（Kissat+CaDiCaL）當 `-c` > 8：預設 portfolio `kcl` 含 Lingeling，在大量 solver 時可能造成 heap 損壞
+- DSRG tracer 在 `addInitialClauses` 期間會暫時停用，避免 CaDiCaL proof 與多執行緒競態
 ```
 
 **Clause → Variable 聚合（Weighted Sum）：**

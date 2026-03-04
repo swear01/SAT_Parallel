@@ -44,7 +44,7 @@ python3 scripts/run_benchmark.py \
     --timeout "$TIMEOUT" \
     --solver-cpus "$CPUS" \
     --benchmarks "$BENCHMARKS" \
-    --solver-args="-shr-strat=4 -shr-gpu" \
+    --solver-args="-shr-strat=4 -shr-gpu -solver=kc" \
     --tag gpu-sample100
 echo "Phase 2 done: $(date)"
 

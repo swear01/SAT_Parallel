@@ -21,6 +21,11 @@ struct WalkSATParams {
     // Hotzone accumulation (device pointers, shared across threads).
     int* clause_unsat_freq;      // [num_clauses] atomic counters
 
+    // Flip-induced edge accumulation (optional, may be null).
+    uint64_t* edge_keys;         // [edge_capacity] hash table keys, 0 = empty
+    int*      edge_counts;       // [edge_capacity] atomic counts
+    int       edge_capacity;
+
     // Parameters.
     int   max_flips;
     float noise_prob;

@@ -4,7 +4,8 @@ graph:
   edge_weight_momentum: 0.9         # β
   node_weight_decay: 0.95            # γ
   lbd_entry_threshold: 3
-  gpu_hotzone_boost: 2.0
+  gpu_hotzone_boost: 2.5      # Tuned: stronger hotzone influence on DSRG
+  gpu_edge_boost: 1.0
 
 centrality:
   algorithm: degree                  # degree | pagerank
@@ -43,3 +44,5 @@ gpu:
   master_push_interval_s: 5.0
   learnt_clause_lbd_filter: 3
   num_walks: 0   # 0=auto from device (SM count, memory)
+  max_flips_per_run: 150000   # Tuned: more exploration per GPU batch
+  edge_hotzone_top_k: 200      # Top-K flip-induced edge pairs to report
